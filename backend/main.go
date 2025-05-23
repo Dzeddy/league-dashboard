@@ -4,8 +4,10 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -48,11 +50,11 @@ func corsMiddleware(next http.Handler) http.Handler {
 func isAWSEnvironment() bool {
 	// Check for common AWS environment variables
 	awsEnvVars := []string{
-		"AWS_EXECUTION_ENV",          // Lambda
-		"AWS_LAMBDA_FUNCTION_NAME",   // Lambda
-		"ECS_CONTAINER_METADATA_URI", // ECS
-		"AWS_REGION",                 // General AWS
-		"AWS_DEFAULT_REGION",         // General AWS
+		"AWS_EXECUTION_ENV",
+		"AWS_LAMBDA_FUNCTION_NAME",
+		"ECS_CONTAINER_METADATA_URI",
+		"AWS_REGION",
+		"AWS_DEFAULT_REGION",
 	}
 
 	for _, envVar := range awsEnvVars {
@@ -81,6 +83,74 @@ func loadEnvironmentConfig() {
 	}
 }
 
+// parseRedisConfig parses Redis configuration from environment variables
+// Supports both simple host:port format and Redis URLs with credentials
+func parseRedisConfig() (addr, password string, db int, err error) {
+	// Default values
+	addr = "localhost:6379"
+	password = ""
+	db = 0
+
+	// Try REDIS_URL first (common in cloud deployments)
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL != "" {
+		log.Println("Using REDIS_URL for Redis configuration")
+
+		// Parse the Redis URL
+		u, parseErr := url.Parse(redisURL)
+		if parseErr != nil {
+			err = parseErr
+			return
+		}
+
+		// Extract host and port
+		addr = u.Host
+
+		// Extract password from URL
+		if u.User != nil {
+			password = u.User.Username()
+			if pwd, set := u.User.Password(); set {
+				password = pwd
+			}
+		}
+
+		// Extract database number from path
+		if u.Path != "" && u.Path != "/" {
+			dbStr := strings.TrimPrefix(u.Path, "/")
+			if dbNum, parseErr := strconv.Atoi(dbStr); parseErr == nil {
+				db = dbNum
+			}
+		}
+
+		log.Printf("Parsed Redis URL - Host: %s, DB: %d, Auth: %t", addr, db, password != "")
+		return
+	}
+
+	// Fall back to individual environment variables
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr != "" {
+		// Remove quotes if present
+		addr = strings.Trim(redisAddr, `"'`)
+		log.Printf("Using REDIS_ADDR: %s", addr)
+	} else {
+		log.Println("REDIS_ADDR not set, defaulting to localhost:6379")
+	}
+
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+	if redisPassword != "" {
+		password = redisPassword
+	}
+
+	redisDB := os.Getenv("REDIS_DB")
+	if redisDB != "" {
+		if dbNum, parseErr := strconv.Atoi(redisDB); parseErr == nil {
+			db = dbNum
+		}
+	}
+
+	return
+}
+
 func main() {
 	log.Println("Starting League Performance Tracker backend...")
 
@@ -104,20 +174,10 @@ func main() {
 		log.Println("MONGO_DATABASE not set, defaulting to leagueperformancetracker")
 	}
 
-	redisAddr := os.Getenv("REDIS_ADDR")
-	if redisAddr == "" {
-		redisAddr = "localhost:6379"
-		log.Println("REDIS_ADDR not set, defaulting to localhost:6379")
-	}
-
-	redisPassword := os.Getenv("REDIS_PASSWORD")
-	redisDB := os.Getenv("REDIS_DB")
-	redisDBNum := 0
-	if redisDB != "" {
-		// Parse Redis DB number if provided
-		if db, err := strconv.Atoi(redisDB); err == nil {
-			redisDBNum = db
-		}
+	// Parse Redis configuration
+	redisAddr, redisPassword, redisDBNum, err := parseRedisConfig()
+	if err != nil {
+		log.Fatalf("Error parsing Redis configuration: %v", err)
 	}
 
 	if redisPassword != "" {
@@ -134,8 +194,8 @@ func main() {
 
 	app.redisClient = redis.NewClient(&redis.Options{
 		Addr:     redisAddr,
-		Password: redisPassword, // password from environment variable
-		DB:       redisDBNum,    // database number from environment variable
+		Password: redisPassword,
+		DB:       redisDBNum,
 	})
 	ctxRedis, cancelRedis := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelRedis()
