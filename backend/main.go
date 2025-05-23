@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/mux"
-	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -46,10 +45,6 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 func main() {
 	log.Println("Starting League Performance Tracker backend...")
-
-	if err := godotenv.Load(); err != nil {
-		log.Fatal("Error loading .env file")
-	}
 
 	app.riotAPIKey = os.Getenv("RIOT_API_KEY")
 	if app.riotAPIKey == "" {
