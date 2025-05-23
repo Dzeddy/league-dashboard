@@ -1,8 +1,8 @@
-# League Dashboard 🎮
+# League Dashboard
 
 A comprehensive League of Legends performance tracking dashboard that provides detailed match statistics, player analytics, and performance insights.
 
-## ✨ Features
+## Features
 
 - **Player Performance Tracking**: Track detailed statistics for any League of Legends player
 - **Match History**: View comprehensive match history with detailed statistics
@@ -12,7 +12,7 @@ A comprehensive League of Legends performance tracking dashboard that provides d
 - **Multiple Regions**: Support for all League of Legends regions
 - **Responsive Design**: Modern, mobile-friendly user interface
 
-## 🏗️ Architecture
+## Architecture
 
 This is a full-stack application consisting of:
 
@@ -22,7 +22,7 @@ This is a full-stack application consisting of:
 - **Cache**: Redis for performance optimization
 - **External API**: Riot Games API integration
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -99,14 +99,14 @@ Before running this application, make sure you have the following installed:
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:8080
 
-## 📖 Usage
+## Usage
 
 1. **Search for a Player**: Enter a player's Game Name and Tag Line (e.g., "Faker", "T1")
 2. **Select Region**: Choose the appropriate region (e.g., kr, na1, euw1)
 3. **View Performance**: Explore detailed match history, statistics, and performance metrics
 4. **Analyze Matches**: Click on individual matches for in-depth analysis
 
-## 🛠️ Development
+## Development
 
 ### Project Structure
 
@@ -156,14 +156,14 @@ In the backend directory:
 - `GET /api/match/{region}/{matchId}` - Get detailed match information
 - `GET /api/popular-items` - Get popular items for preloading
 
-## 🗄️ Database Schema
+## Database Schema
 
 The application uses MongoDB with the following main collections:
 - **players** - Player information and statistics
 - **matches** - Match data and results
 - **static_data** - Cached League of Legends static data (champions, items, etc.)
 
-## 🔧 Configuration
+## Configuration
 
 ### Environment Variables
 
@@ -188,7 +188,7 @@ The application uses MongoDB with the following main collections:
 - `ru` - Russia
 - `tr1` - Turkey
 
-## 🚀 Deployment
+## Deployment
 
 ### Production Build
 
@@ -211,7 +211,7 @@ The application uses MongoDB with the following main collections:
 
 *Docker configuration coming soon...*
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -227,17 +227,17 @@ The application uses MongoDB with the following main collections:
 - Update documentation as needed
 - Follow the existing code style
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [Riot Games](https://developer.riotgames.com/) for providing the League of Legends API
 - [Data Dragon](https://developer.riotgames.com/docs/lol#data-dragon) for static assets
 - React and Go communities for excellent documentation and tools
 
-## 📞 Support
+## Support
 
 If you encounter any issues or have questions:
 
@@ -245,7 +245,7 @@ If you encounter any issues or have questions:
 2. Create a new issue with detailed information
 3. Join our community discussions
 
-## 🔄 Changelog
+## Changelog
 
 ### Version 1.0.0
 - Initial release
