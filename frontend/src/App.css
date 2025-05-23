@@ -491,10 +491,11 @@ button, select, input {
 }
 
 .recent-match-right {
-  /* For the three-dot menu icon */
-  font-size: 1.5em;
-  color: #777;
-  cursor: pointer;
+  /* For the three-dot menu icon and item preview */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
 }
 
 .view-more-btn {
@@ -523,12 +524,32 @@ button, select, input {
     align-items: flex-start;
     padding: 15px;
   }
+  
+  .recent-champ-section {
+    width: 100%;
+    margin-bottom: 10px;
+  }
+  
+  .recent-champ-with-spells {
+    margin-right: 0;
+    margin-bottom: 8px;
+  }
+  
   .recent-match-center {
     margin: 10px 0;
     min-width: auto;
+    width: 100%;
   }
+  
   .recent-match-right {
     align-self: flex-end;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .recent-items-preview {
+    margin-bottom: 0;
   }
 }
 
@@ -605,7 +626,27 @@ button, select, input {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 10px;
+  gap: 16px;
+}
+.arena-team-group {
+  width: 100%;
+  background: #1e2328;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.arena-team-header {
+  margin-bottom: 12px;
+}
+.arena-team-place {
+  color: #c89b3c;
+  font-weight: bold;
+  font-size: 1.1em;
+}
+.arena-team-members {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .arena-player-card {
   background: #2a2f35;
@@ -671,4 +712,235 @@ button, select, input {
   border-radius: 50%;
   border: 2px solid #222;
   z-index: 2;
+}
+
+/* Enhanced Modal Styles */
+.modal-champion-portrait {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  border: 2px solid #333;
+  margin-right: 12px;
+}
+
+.player-champ-info {
+  display: flex;
+  align-items: center;
+  flex: 1;
+}
+
+.player-name-champ {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.player-level {
+  color: #f0c040;
+  font-size: 0.85em;
+  font-weight: bold;
+}
+
+.summoner-spells-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.summoner-spell-modal {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid #333;
+}
+
+/* Enhanced Arena Player Cards */
+.arena-player-card.enhanced {
+  background: #2a2f35;
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: #eee;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.arena-player-header-enhanced {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.arena-player-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.arena-player-kda {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.kda-numbers {
+  font-weight: bold;
+  color: #fff;
+}
+
+.kda-ratio {
+  font-size: 0.9em;
+  color: #ccc;
+}
+
+/* Enhanced Regular Match Player Cards */
+.player-card-modal.enhanced {
+  background: #2a2f35;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  color: #eee;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.player-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.player-stats-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kda-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.additional-stats {
+  display: flex;
+  gap: 15px;
+  font-size: 0.9em;
+  color: #ccc;
+}
+
+.additional-stats span {
+  font-size: 0.85em;
+}
+
+/* Item icons styling */
+.item-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid #333;
+  background: #222;
+}
+
+.item-icon.empty-item {
+  background: #1a1a1a;
+  border: 1px solid #444;
+}
+
+.item-icon.trinket-icon {
+  border-color: #c89b3c;
+}
+
+.player-items-modal,
+.arena-player-items {
+  display: flex;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+/* Enhanced Recent Match Card Styles */
+.recent-champ-section {
+  display: flex;
+  align-items: center;
+  flex-grow: 1;
+}
+
+.recent-champ-with-spells {
+  display: flex;
+  align-items: center;
+  margin-right: 15px;
+}
+
+.recent-summoner-spells {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-right: 8px;
+}
+
+.recent-summoner-spell {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  border: 1px solid #333;
+}
+
+.recent-champ-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.recent-champ-level {
+  font-size: 0.75em;
+  color: #f0c040;
+  font-weight: bold;
+  text-align: center;
+}
+
+.recent-kda-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.recent-match-kda {
+  font-weight: bold;
+  color: #fff;
+  font-size: 1em;
+}
+
+.recent-kda-ratio {
+  font-size: 0.85em;
+  color: #ccc;
+}
+
+.recent-items-preview {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+  justify-content: flex-end;
+}
+
+.recent-item-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  border: 1px solid #333;
+  background: #222;
+}
+
+.recent-item-icon.empty {
+  background: #1a1a1a;
+  border: 1px solid #444;
+}
+
+.recent-match-menu {
+  font-size: 1.5em;
+  color: #777;
+  cursor: pointer;
 }

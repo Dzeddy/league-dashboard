@@ -206,16 +206,58 @@ function App() {
     }
   };
 
-  const getChampionImageURL = (championName: string) => {
-    if (!staticData || !championName) return 'placeholder.png'; // Fallback image
-    // Champion names in DDragon often don't have spaces or special chars.
-    // The ChampionData.id is the one to use for image names.
-    // We need to find the champion by name, then use its id for the image.
-    const championKey = Object.keys(staticData.champions).find(key => staticData.champions[key].name === championName);
-    if (championKey) {
-        const champ = staticData.champions[championKey];
-        return `${staticData.latestVersion}/img/champion/${champ.image.full}`;
+  const getChampionImageURL = (championName: string, championId?: number) => {
+    if (!staticData) return 'placeholder.png';
+    
+    // Log for debugging champion name issues
+    if (championName && (championName.includes("'") || championName.includes(" "))) {
+      console.log(`Looking up champion: ${championName} (ID: ${championId})`);
     }
+    
+    // Prefer lookup by championId (key) if available - this is most reliable
+    if (championId !== undefined && championId !== null) {
+      const champ = staticData.champions[String(championId)];
+      if (champ) {
+        console.log(`Found champion by ID ${championId}: ${champ.id} (${champ.name})`);
+        return `${staticData.latestVersion}/img/champion/${champ.image.full}`;
+      } else {
+        console.warn(`Champion ID ${championId} not found in static data. Available keys:`, Object.keys(staticData.champions).slice(0, 5));
+      }
+    }
+    
+    // Fallback: try to find by name (case-insensitive and handle special characters)
+    if (championName) {
+      const championKey = Object.keys(staticData.champions).find(key => {
+        const champData = staticData.champions[key];
+        // Try exact match first
+        if (champData.name === championName) return true;
+        // Try case-insensitive match
+        if (champData.name.toLowerCase() === championName.toLowerCase()) return true;
+        // Try ID match (for cases where championName might actually be the ID)
+        if (champData.id === championName) return true;
+        if (champData.id.toLowerCase() === championName.toLowerCase()) return true;
+        // Try match without spaces/apostrophes for names like "Cho'Gath" -> "Chogath"
+        const normalizedDataName = champData.name.toLowerCase().replace(/['\s]/g, '');
+        const normalizedInputName = championName.toLowerCase().replace(/['\s]/g, '');
+        if (normalizedDataName === normalizedInputName) return true;
+        // Try ID without special chars
+        const normalizedDataId = champData.id.toLowerCase().replace(/['\s]/g, '');
+        if (normalizedDataId === normalizedInputName) return true;
+        return false;
+      });
+      
+      if (championKey) {
+        const champ = staticData.champions[championKey];
+        console.log(`Found champion by name "${championName}": ${champ.id} (${champ.name})`);
+        return `${staticData.latestVersion}/img/champion/${champ.image.full}`;
+      } else {
+        console.warn(`Champion "${championName}" not found in static data`);
+        // Log some available champions for debugging
+        const sampleChamps = Object.values(staticData.champions).slice(0, 3);
+        console.log(`Sample champions:`, sampleChamps.map(c => ({ id: c.id, name: c.name, key: c.key })));
+      }
+    }
+    
     return 'placeholder.png';
   };
 
@@ -319,7 +361,7 @@ function App() {
     preloadMatchItems(match);
 
     const championImageKey = `champion-${match.championName}`;
-    const championImageUrl = staticData ? `${dataDragonBase}/${getChampionImageURL(match.championName)}` : '';
+    const championImageUrl = staticData ? `${dataDragonBase}/${getChampionImageURL(match.championName, match.championId)}` : '';
     
     // Determine role icon
     const role = match.teamPosition || 'NONE';
@@ -414,23 +456,10 @@ function App() {
     </div>
   );
   
-  // Helper: Get champion icon URL
+  // Helper: Get champion icon URL - now uses the improved getChampionImageURL function
   const getChampionIcon = (championName: string, championId?: number) => {
-    if (!staticData) return 'placeholder.png';
-    // Prefer lookup by championId (key) if available
-    if (championId !== undefined && championId !== null) {
-      const champ = staticData.champions[String(championId)];
-      if (champ) {
-        return `https://ddragon.leagueoflegends.com/cdn/${staticData.latestVersion}/img/champion/${champ.id}.png`;
-      }
-    }
-    // Fallback: try to find by name (case-insensitive)
-    const championKey = Object.keys(staticData.champions).find(key => staticData.champions[key].name.toLowerCase() === championName.toLowerCase());
-    if (championKey) {
-      const champ = staticData.champions[championKey];
-      return `https://ddragon.leagueoflegends.com/cdn/${staticData.latestVersion}/img/champion/${champ.id}.png`;
-    }
-    return 'placeholder.png';
+    const imageUrl = getChampionImageURL(championName, championId);
+    return imageUrl === 'placeholder.png' ? 'placeholder.png' : `https://ddragon.leagueoflegends.com/cdn/${imageUrl}`;
   };
 
   // Helper: Format match time (e.g., '19m ago')
@@ -534,24 +563,60 @@ function App() {
                     style={{ cursor: 'pointer' }}
                   >
                     <div className="recent-match-left">
-                      <img src={champIcon} alt={match.championName} className="recent-champ-icon" onError={e => (e.currentTarget.src = 'placeholder.png')} />
-                      <div className="recent-match-meta">
-                        <span className="recent-match-map">{match.championName}</span>
-                        <span className="recent-match-time">{formatTimeAgo(match.gameCreation)}</span>
-                        <span className="recent-match-mode">{getDisplayGameMode(match.gameMode, match.queueId)}</span>
+                      <div className="recent-champ-section">
+                        <div className="recent-champ-with-spells">
+                          <div className="recent-summoner-spells">
+                            {match.summonerSpells.map((spellId, index) => (
+                              <img
+                                key={`spell-${index}-${spellId}`}
+                                src={staticData ? `${dataDragonBase}/${getSummonerSpellImageURL(spellId)}` : ''}
+                                alt={`Summoner Spell ${spellId}`}
+                                className="recent-summoner-spell"
+                                onError={(e) => (e.currentTarget.src = 'placeholder.png')}
+                              />
+                            ))}
+                          </div>
+                          <div className="recent-champ-info">
+                            <img src={champIcon} alt={match.championName} className="recent-champ-icon" onError={e => (e.currentTarget.src = 'placeholder.png')} />
+                            <span className="recent-champ-level">Lv.{match.champLevel}</span>
+                          </div>
+                        </div>
+                        <div className="recent-match-meta">
+                          <span className="recent-match-map">{match.championName}</span>
+                          <span className="recent-match-time">{formatTimeAgo(match.gameCreation)}</span>
+                          <span className="recent-match-mode">{getDisplayGameMode(match.gameMode, match.queueId)}</span>
+                        </div>
                       </div>
                     </div>
                     <div className="recent-match-center">
+                      <div className="recent-kda-section">
+                        <span className="recent-match-kda">{match.kills}/{match.deaths}/{match.assists}</span>
+                        <span className="recent-kda-ratio">{match.kda.toFixed(2)} KDA</span>
+                      </div>
                       {!isArena && (
                         <span className="recent-match-cs">CS/min: {getCsPerMin(match)}</span>
                       )}
-                      <span className="recent-match-kda">K/D/A: {match.kills}/{match.deaths}/{match.assists}</span>
                       {isArena && (
                         <span className="recent-match-arena-place">Place: {getArenaPlace(match)}</span>
                       )}
                       <span className="recent-match-length">{formatGameDuration(match.gameDuration)}</span>
                     </div>
                     <div className="recent-match-right">
+                      <div className="recent-items-preview">
+                        {match.items.slice(0, 3).map((itemId, index) => (
+                          itemId > 0 ? (
+                            <img
+                              key={index}
+                              src={staticData ? `${dataDragonBase}/${getItemImageURL(itemId)}` : ''}
+                              alt={`Item ${itemId}`}
+                              className="recent-item-icon"
+                              onError={(e) => (e.currentTarget.src = 'placeholder.png')}
+                            />
+                          ) : (
+                            <div key={index} className="recent-item-icon empty" />
+                          )
+                        ))}
+                      </div>
                       <span className="recent-match-menu">⋮</span>
                     </div>
                   </div>
@@ -610,13 +675,43 @@ function App() {
                       </div>
                       <div className="arena-team-members">
                         {team.members.map((p: any, i: number) => (
-                          <div key={i} className="arena-player-card">
-                            <div className="arena-player-header">
-                              <span className="arena-player-name">{p.riotIdGameName || p.summonerName || 'Unknown Player'}</span>
-                              <span className="arena-player-champ">{p.championName}</span>
+                          <div key={i} className="arena-player-card enhanced">
+                            <div className="arena-player-header-enhanced">
+                              <div className="player-champ-info">
+                                <img
+                                  src={staticData ? `${dataDragonBase}/${getChampionImageURL(p.championName, p.championId)}` : ''}
+                                  alt={p.championName}
+                                  className="modal-champion-portrait"
+                                  onError={(e) => (e.currentTarget.src = 'placeholder.png')}
+                                />
+                                <div className="player-name-champ">
+                                  <span className="arena-player-name">{p.riotIdGameName || p.summonerName || 'Unknown Player'}</span>
+                                  <span className="arena-player-champ">{p.championName}</span>
+                                  <span className="player-level">Level {p.champLevel}</span>
+                                </div>
+                              </div>
+                              <div className="summoner-spells-modal">
+                                <img
+                                  src={staticData ? `${dataDragonBase}/${getSummonerSpellImageURL(p.summoner1Id)}` : ''}
+                                  alt="Summoner Spell 1"
+                                  className="summoner-spell-modal"
+                                  onError={(e) => (e.currentTarget.src = 'placeholder.png')}
+                                />
+                                <img
+                                  src={staticData ? `${dataDragonBase}/${getSummonerSpellImageURL(p.summoner2Id)}` : ''}
+                                  alt="Summoner Spell 2"
+                                  className="summoner-spell-modal"
+                                  onError={(e) => (e.currentTarget.src = 'placeholder.png')}
+                                />
+                              </div>
                             </div>
-                            <div className="arena-player-kda">K/D/A: {p.kills}/{p.deaths}/{p.assists}</div>
-                            <div className="arena-player-items">{renderItemIcons([p.item0, p.item1, p.item2, p.item3, p.item4, p.item5])}</div>
+                            <div className="arena-player-stats">
+                              <div className="arena-player-kda">
+                                <span className="kda-numbers">{p.kills}/{p.deaths}/{p.assists}</span>
+                                <span className="kda-ratio">KDA: {p.deaths > 0 ? ((p.kills + p.assists) / p.deaths).toFixed(2) : (p.kills + p.assists)}</span>
+                              </div>
+                              <div className="arena-player-items">{renderItemIcons([p.item0, p.item1, p.item2, p.item3, p.item4, p.item5])}</div>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -634,13 +729,46 @@ function App() {
                   <div className="team team-blue">
                     <h4>Blue Team</h4>
                     {fullMatchData.info.participants.filter((p: any) => p.teamId === 100).map((p: any, idx: number) => (
-                      <div key={idx} className="player-card-modal">
-                        <span className="player-champ-modal">{p.championName}</span>
-                        <span className="player-name-modal">{p.summonerName || p.riotIdGameName || '-'}</span>
-                        <span>K/D/A: {p.kills}/{p.deaths}/{p.assists}</span>
-                        <span>KDA: {p.deaths > 0 ? ((p.kills + p.assists) / p.deaths).toFixed(2) : (p.kills + p.assists)}</span>
-                        <span>Gold: {p.goldEarned}</span>
-                        <span>CS/min: {((p.totalMinionsKilled + p.neutralMinionsKilled) / (selectedMatch.gameDuration / 60)).toFixed(2)}</span>
+                      <div key={idx} className="player-card-modal enhanced">
+                        <div className="player-modal-header">
+                          <div className="player-champ-info">
+                            <img
+                              src={staticData ? `${dataDragonBase}/${getChampionImageURL(p.championName, p.championId)}` : ''}
+                              alt={p.championName}
+                              className="modal-champion-portrait"
+                              onError={(e) => (e.currentTarget.src = 'placeholder.png')}
+                            />
+                            <div className="player-name-champ">
+                              <span className="player-name-modal">{p.summonerName || p.riotIdGameName || '-'}</span>
+                              <span className="player-champ-modal">{p.championName}</span>
+                              <span className="player-level">Level {p.champLevel}</span>
+                            </div>
+                          </div>
+                          <div className="summoner-spells-modal">
+                            <img
+                              src={staticData ? `${dataDragonBase}/${getSummonerSpellImageURL(p.summoner1Id)}` : ''}
+                              alt="Summoner Spell 1"
+                              className="summoner-spell-modal"
+                              onError={(e) => (e.currentTarget.src = 'placeholder.png')}
+                            />
+                            <img
+                              src={staticData ? `${dataDragonBase}/${getSummonerSpellImageURL(p.summoner2Id)}` : ''}
+                              alt="Summoner Spell 2"
+                              className="summoner-spell-modal"
+                              onError={(e) => (e.currentTarget.src = 'placeholder.png')}
+                            />
+                          </div>
+                        </div>
+                        <div className="player-stats-grid">
+                          <div className="kda-section">
+                            <span className="kda-numbers">K/D/A: {p.kills}/{p.deaths}/{p.assists}</span>
+                            <span className="kda-ratio">KDA: {p.deaths > 0 ? ((p.kills + p.assists) / p.deaths).toFixed(2) : (p.kills + p.assists)}</span>
+                          </div>
+                          <div className="additional-stats">
+                            <span>Gold: {p.goldEarned}</span>
+                            <span>CS/min: {((p.totalMinionsKilled + p.neutralMinionsKilled) / (selectedMatch.gameDuration / 60)).toFixed(2)}</span>
+                          </div>
+                        </div>
                         <div className="player-items-modal">{renderItemIcons([p.item0, p.item1, p.item2, p.item3, p.item4, p.item5])}</div>
                       </div>
                     ))}
@@ -648,13 +776,46 @@ function App() {
                   <div className="team team-red">
                     <h4>Red Team</h4>
                     {fullMatchData.info.participants.filter((p: any) => p.teamId === 200).map((p: any, idx: number) => (
-                      <div key={idx} className="player-card-modal">
-                        <span className="player-champ-modal">{p.championName}</span>
-                        <span className="player-name-modal">{p.summonerName || p.riotIdGameName || '-'}</span>
-                        <span>K/D/A: {p.kills}/{p.deaths}/{p.assists}</span>
-                        <span>KDA: {p.deaths > 0 ? ((p.kills + p.assists) / p.deaths).toFixed(2) : (p.kills + p.assists)}</span>
-                        <span>Gold: {p.goldEarned}</span>
-                        <span>CS/min: {((p.totalMinionsKilled + p.neutralMinionsKilled) / (selectedMatch.gameDuration / 60)).toFixed(2)}</span>
+                      <div key={idx} className="player-card-modal enhanced">
+                        <div className="player-modal-header">
+                          <div className="player-champ-info">
+                            <img
+                              src={staticData ? `${dataDragonBase}/${getChampionImageURL(p.championName, p.championId)}` : ''}
+                              alt={p.championName}
+                              className="modal-champion-portrait"
+                              onError={(e) => (e.currentTarget.src = 'placeholder.png')}
+                            />
+                            <div className="player-name-champ">
+                              <span className="player-name-modal">{p.summonerName || p.riotIdGameName || '-'}</span>
+                              <span className="player-champ-modal">{p.championName}</span>
+                              <span className="player-level">Level {p.champLevel}</span>
+                            </div>
+                          </div>
+                          <div className="summoner-spells-modal">
+                            <img
+                              src={staticData ? `${dataDragonBase}/${getSummonerSpellImageURL(p.summoner1Id)}` : ''}
+                              alt="Summoner Spell 1"
+                              className="summoner-spell-modal"
+                              onError={(e) => (e.currentTarget.src = 'placeholder.png')}
+                            />
+                            <img
+                              src={staticData ? `${dataDragonBase}/${getSummonerSpellImageURL(p.summoner2Id)}` : ''}
+                              alt="Summoner Spell 2"
+                              className="summoner-spell-modal"
+                              onError={(e) => (e.currentTarget.src = 'placeholder.png')}
+                            />
+                          </div>
+                        </div>
+                        <div className="player-stats-grid">
+                          <div className="kda-section">
+                            <span className="kda-numbers">K/D/A: {p.kills}/{p.deaths}/{p.assists}</span>
+                            <span className="kda-ratio">KDA: {p.deaths > 0 ? ((p.kills + p.assists) / p.deaths).toFixed(2) : (p.kills + p.assists)}</span>
+                          </div>
+                          <div className="additional-stats">
+                            <span>Gold: {p.goldEarned}</span>
+                            <span>CS/min: {((p.totalMinionsKilled + p.neutralMinionsKilled) / (selectedMatch.gameDuration / 60)).toFixed(2)}</span>
+                          </div>
+                        </div>
                         <div className="player-items-modal">{renderItemIcons([p.item0, p.item1, p.item2, p.item3, p.item4, p.item5])}</div>
                       </div>
                     ))}
