@@ -1,0 +1,49 @@
+{
+  "name": "league-dashboard",
+  "version": "1.0.0",
+  "description": "A comprehensive League of Legends performance tracking dashboard",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run backend:dev\" \"npm run frontend:dev\"",
+    "backend:dev": "cd backend && go run .",
+    "frontend:dev": "cd frontend && npm start",
+    "build": "cd frontend && npm run build",
+    "install:all": "npm install && cd frontend && npm install && cd ../backend && go mod download",
+    "clean": "rm -rf frontend/build && rm -rf backend/league-dashboard-server",
+    "test": "cd frontend && npm test",
+    "test:backend": "cd backend && go test ./...",
+    "lint": "cd frontend && npm run lint",
+    "start": "npm run dev"
+  },
+  "keywords": [
+    "league-of-legends",
+    "riot-api",
+    "performance-tracker",
+    "gaming",
+    "statistics",
+    "react",
+    "go",
+    "mongodb",
+    "redis"
+  ],
+  "author": "League Dashboard Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/league_dashboard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/league_dashboard/issues"
+  },
+  "homepage": "https://github.com/yourusername/league_dashboard#readme",
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "dayjs": "^1.11.13"
+  }
+}

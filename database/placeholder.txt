@@ -1,0 +1,1 @@
+# This directory can hold MongoDB scripts or configuration. 
