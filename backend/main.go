@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -43,8 +44,48 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// isAWSEnvironment detects if the application is running in an AWS environment
+func isAWSEnvironment() bool {
+	// Check for common AWS environment variables
+	awsEnvVars := []string{
+		"AWS_EXECUTION_ENV",          // Lambda
+		"AWS_LAMBDA_FUNCTION_NAME",   // Lambda
+		"ECS_CONTAINER_METADATA_URI", // ECS
+		"AWS_REGION",                 // General AWS
+		"AWS_DEFAULT_REGION",         // General AWS
+	}
+
+	for _, envVar := range awsEnvVars {
+		if os.Getenv(envVar) != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// loadEnvironmentConfig loads environment variables from .env file or AWS environment
+func loadEnvironmentConfig() {
+	isAWS := isAWSEnvironment()
+
+	if isAWS {
+		log.Println("AWS environment detected. Using environment variables from AWS.")
+	} else {
+		// Try to load .env file for local development
+		if err := godotenv.Load(); err != nil {
+			log.Println("No .env file found or error loading .env file. Using system environment variables.")
+			log.Printf("Continuing with system environment variables. Error was: %v", err)
+		} else {
+			log.Println("Successfully loaded .env file for local development.")
+		}
+	}
+}
+
 func main() {
 	log.Println("Starting League Performance Tracker backend...")
+
+	// Load environment configuration
+	loadEnvironmentConfig()
 
 	app.riotAPIKey = os.Getenv("RIOT_API_KEY")
 	if app.riotAPIKey == "" {
@@ -84,6 +125,10 @@ func main() {
 	} else {
 		log.Println("Redis password authentication disabled (no password set)")
 	}
+
+	// Add environment configuration summary
+	log.Printf("Configuration summary - MongoDB: %s, Redis: %s, Database: %s",
+		mongoURI, redisAddr, app.mongoDatabase)
 
 	app.httpClient = &http.Client{Timeout: defaultTimeout}
 

@@ -313,11 +313,9 @@ type GlobalAppData struct {
 	mongoClient   *mongo.Client
 	mongoDatabase string
 	riotAPIKey    string
-	staticData    *StaticData // Pointer to allow for late initialization
-	// championIDMap map[int]string // map championId to championName (filled from Data Dragon)
+	staticData    *StaticData
 }
 
-// RecentGamesSummary holds comprehensive statistics for recent games
 type RecentGamesSummary struct {
 	PUUID         string                   `json:"puuid" bson:"_id"`
 	Region        string                   `json:"region" bson:"region"`
@@ -330,7 +328,6 @@ type RecentGamesSummary struct {
 	LastUpdated   int64                    `json:"lastUpdated" bson:"lastUpdated"`
 }
 
-// OverallStats contains overall performance metrics
 type OverallStats struct {
 	Wins                 int     `json:"wins" bson:"wins"`
 	Losses               int     `json:"losses" bson:"losses"`
@@ -351,7 +348,6 @@ type OverallStats struct {
 	AvgKillParticipation float64 `json:"avgKillParticipation" bson:"avgKillParticipation"`
 }
 
-// RoleStats contains performance metrics for a specific role/position
 type RoleStats struct {
 	Role                 string  `json:"role" bson:"role"`
 	GamesPlayed          int     `json:"gamesPlayed" bson:"gamesPlayed"`
@@ -372,7 +368,6 @@ type RoleStats struct {
 	AvgKillParticipation float64 `json:"avgKillParticipation" bson:"avgKillParticipation"`
 }
 
-// ChampionStats contains performance metrics for a specific champion
 type ChampionStats struct {
 	ChampionName         string  `json:"championName" bson:"championName"`
 	ChampionID           int     `json:"championId" bson:"championId"`
