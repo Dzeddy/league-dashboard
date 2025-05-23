@@ -189,11 +189,6 @@ tramp
 *.key
 *.crt
 
-# Docker
-.dockerignore
-Dockerfile*
-docker-compose*.yml
-
 # Terraform
 *.tfstate
 *.tfstate.*
