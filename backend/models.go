@@ -316,3 +316,83 @@ type GlobalAppData struct {
 	staticData    *StaticData // Pointer to allow for late initialization
 	// championIDMap map[int]string // map championId to championName (filled from Data Dragon)
 }
+
+// RecentGamesSummary holds comprehensive statistics for recent games
+type RecentGamesSummary struct {
+	PUUID         string                   `json:"puuid" bson:"_id"`
+	Region        string                   `json:"region" bson:"region"`
+	RiotID        string                   `json:"riotId" bson:"riotId"`
+	TotalMatches  int                      `json:"totalMatches" bson:"totalMatches"`
+	OverallStats  OverallStats             `json:"overallStats" bson:"overallStats"`
+	RoleStats     map[string]RoleStats     `json:"roleStats" bson:"roleStats"`
+	ChampionStats map[string]ChampionStats `json:"championStats" bson:"championStats"`
+	RecentMatches []PlayerMatchStats       `json:"recentMatches" bson:"recentMatches"`
+	LastUpdated   int64                    `json:"lastUpdated" bson:"lastUpdated"`
+}
+
+// OverallStats contains overall performance metrics
+type OverallStats struct {
+	Wins                 int     `json:"wins" bson:"wins"`
+	Losses               int     `json:"losses" bson:"losses"`
+	WinRate              float64 `json:"winRate" bson:"winRate"`
+	TotalKills           int     `json:"totalKills" bson:"totalKills"`
+	TotalDeaths          int     `json:"totalDeaths" bson:"totalDeaths"`
+	TotalAssists         int     `json:"totalAssists" bson:"totalAssists"`
+	AvgKills             float64 `json:"avgKills" bson:"avgKills"`
+	AvgDeaths            float64 `json:"avgDeaths" bson:"avgDeaths"`
+	AvgAssists           float64 `json:"avgAssists" bson:"avgAssists"`
+	OverallKDA           float64 `json:"overallKDA" bson:"overallKDA"`
+	AvgGameDuration      float64 `json:"avgGameDuration" bson:"avgGameDuration"`
+	TotalGameTime        int64   `json:"totalGameTime" bson:"totalGameTime"`
+	AvgVisionScore       float64 `json:"avgVisionScore" bson:"avgVisionScore"`
+	AvgCSPerMin          float64 `json:"avgCSPerMin" bson:"avgCSPerMin"`
+	AvgGoldPerMin        float64 `json:"avgGoldPerMin" bson:"avgGoldPerMin"`
+	AvgDamageToChampions float64 `json:"avgDamageToChampions" bson:"avgDamageToChampions"`
+	AvgKillParticipation float64 `json:"avgKillParticipation" bson:"avgKillParticipation"`
+}
+
+// RoleStats contains performance metrics for a specific role/position
+type RoleStats struct {
+	Role                 string  `json:"role" bson:"role"`
+	GamesPlayed          int     `json:"gamesPlayed" bson:"gamesPlayed"`
+	Wins                 int     `json:"wins" bson:"wins"`
+	Losses               int     `json:"losses" bson:"losses"`
+	WinRate              float64 `json:"winRate" bson:"winRate"`
+	TotalKills           int     `json:"totalKills" bson:"totalKills"`
+	TotalDeaths          int     `json:"totalDeaths" bson:"totalDeaths"`
+	TotalAssists         int     `json:"totalAssists" bson:"totalAssists"`
+	AvgKills             float64 `json:"avgKills" bson:"avgKills"`
+	AvgDeaths            float64 `json:"avgDeaths" bson:"avgDeaths"`
+	AvgAssists           float64 `json:"avgAssists" bson:"avgAssists"`
+	RoleKDA              float64 `json:"roleKDA" bson:"roleKDA"`
+	AvgVisionScore       float64 `json:"avgVisionScore" bson:"avgVisionScore"`
+	AvgCSPerMin          float64 `json:"avgCSPerMin" bson:"avgCSPerMin"`
+	AvgGoldPerMin        float64 `json:"avgGoldPerMin" bson:"avgGoldPerMin"`
+	AvgDamageToChampions float64 `json:"avgDamageToChampions" bson:"avgDamageToChampions"`
+	AvgKillParticipation float64 `json:"avgKillParticipation" bson:"avgKillParticipation"`
+}
+
+// ChampionStats contains performance metrics for a specific champion
+type ChampionStats struct {
+	ChampionName         string  `json:"championName" bson:"championName"`
+	ChampionID           int     `json:"championId" bson:"championId"`
+	GamesPlayed          int     `json:"gamesPlayed" bson:"gamesPlayed"`
+	Wins                 int     `json:"wins" bson:"wins"`
+	Losses               int     `json:"losses" bson:"losses"`
+	WinRate              float64 `json:"winRate" bson:"winRate"`
+	TotalKills           int     `json:"totalKills" bson:"totalKills"`
+	TotalDeaths          int     `json:"totalDeaths" bson:"totalDeaths"`
+	TotalAssists         int     `json:"totalAssists" bson:"totalAssists"`
+	AvgKills             float64 `json:"avgKills" bson:"avgKills"`
+	AvgDeaths            float64 `json:"avgDeaths" bson:"avgDeaths"`
+	AvgAssists           float64 `json:"avgAssists" bson:"avgAssists"`
+	ChampionKDA          float64 `json:"championKDA" bson:"championKDA"`
+	BestKDA              float64 `json:"bestKDA" bson:"bestKDA"`
+	WorstKDA             float64 `json:"worstKDA" bson:"worstKDA"`
+	AvgVisionScore       float64 `json:"avgVisionScore" bson:"avgVisionScore"`
+	AvgCSPerMin          float64 `json:"avgCSPerMin" bson:"avgCSPerMin"`
+	AvgGoldPerMin        float64 `json:"avgGoldPerMin" bson:"avgGoldPerMin"`
+	AvgDamageToChampions float64 `json:"avgDamageToChampions" bson:"avgDamageToChampions"`
+	AvgKillParticipation float64 `json:"avgKillParticipation" bson:"avgKillParticipation"`
+	LastPlayed           int64   `json:"lastPlayed" bson:"lastPlayed"`
+}

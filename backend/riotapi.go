@@ -606,3 +606,308 @@ func getAPIRegion(region string) string {
 		return "americas"
 	}
 }
+
+// calculateRecentGamesSummary analyzes matches and creates comprehensive statistics
+func calculateRecentGamesSummary(matches []PlayerMatchStats, puuid, region, riotID string) *RecentGamesSummary {
+	if len(matches) == 0 {
+		return &RecentGamesSummary{
+			PUUID:         puuid,
+			Region:        region,
+			RiotID:        riotID,
+			TotalMatches:  0,
+			OverallStats:  OverallStats{},
+			RoleStats:     make(map[string]RoleStats),
+			ChampionStats: make(map[string]ChampionStats),
+			RecentMatches: []PlayerMatchStats{},
+			LastUpdated:   time.Now().Unix(),
+		}
+	}
+
+	// Calculate overall stats
+	overallStats := calculateOverallStats(matches)
+
+	// Calculate role-based stats
+	roleStats := calculateRoleStats(matches)
+
+	// Calculate champion-based stats
+	championStats := calculateChampionStats(matches)
+
+	return &RecentGamesSummary{
+		PUUID:         puuid,
+		Region:        region,
+		RiotID:        riotID,
+		TotalMatches:  len(matches),
+		OverallStats:  overallStats,
+		RoleStats:     roleStats,
+		ChampionStats: championStats,
+		RecentMatches: matches,
+		LastUpdated:   time.Now().Unix(),
+	}
+}
+
+// calculateOverallStats computes aggregate statistics across all matches
+func calculateOverallStats(matches []PlayerMatchStats) OverallStats {
+	if len(matches) == 0 {
+		return OverallStats{}
+	}
+
+	var wins, totalKills, totalDeaths, totalAssists int
+	var totalGameTime, totalVisionScore, totalCS, totalGold, totalDamage int64
+	var totalKillParticipation float64
+
+	for _, match := range matches {
+		if match.Win {
+			wins++
+		}
+		totalKills += match.Kills
+		totalDeaths += match.Deaths
+		totalAssists += match.Assists
+		totalGameTime += match.GameDuration
+		totalVisionScore += int64(match.VisionScore)
+		totalCS += int64(match.TotalMinionsKilled)
+		totalGold += int64(match.GoldEarned)
+		totalDamage += int64(match.DamageToChampions)
+		totalKillParticipation += match.KillParticipation
+	}
+
+	losses := len(matches) - wins
+	winRate := float64(wins) / float64(len(matches)) * 100
+
+	// Calculate KDA
+	var overallKDA float64
+	if totalDeaths > 0 {
+		overallKDA = float64(totalKills+totalAssists) / float64(totalDeaths)
+	} else {
+		overallKDA = float64(totalKills + totalAssists)
+	}
+
+	return OverallStats{
+		Wins:                 wins,
+		Losses:               losses,
+		WinRate:              winRate,
+		TotalKills:           totalKills,
+		TotalDeaths:          totalDeaths,
+		TotalAssists:         totalAssists,
+		AvgKills:             float64(totalKills) / float64(len(matches)),
+		AvgDeaths:            float64(totalDeaths) / float64(len(matches)),
+		AvgAssists:           float64(totalAssists) / float64(len(matches)),
+		OverallKDA:           overallKDA,
+		AvgGameDuration:      float64(totalGameTime) / float64(len(matches)),
+		TotalGameTime:        totalGameTime,
+		AvgVisionScore:       float64(totalVisionScore) / float64(len(matches)),
+		AvgCSPerMin:          (float64(totalCS) / float64(totalGameTime)) * 60,
+		AvgGoldPerMin:        (float64(totalGold) / float64(totalGameTime)) * 60,
+		AvgDamageToChampions: float64(totalDamage) / float64(len(matches)),
+		AvgKillParticipation: totalKillParticipation / float64(len(matches)),
+	}
+}
+
+// calculateRoleStats computes statistics grouped by role/position
+func calculateRoleStats(matches []PlayerMatchStats) map[string]RoleStats {
+	roleMap := make(map[string][]PlayerMatchStats)
+
+	// Group matches by role
+	for _, match := range matches {
+		role := normalizeRole(match.TeamPosition, match.GameMode)
+		roleMap[role] = append(roleMap[role], match)
+	}
+
+	roleStats := make(map[string]RoleStats)
+	for role, roleMatches := range roleMap {
+		if len(roleMatches) == 0 {
+			continue
+		}
+
+		var wins, totalKills, totalDeaths, totalAssists int
+		var totalVisionScore, totalCS, totalGold, totalDamage int64
+		var totalKillParticipation float64
+		var totalGameTime int64
+
+		for _, match := range roleMatches {
+			if match.Win {
+				wins++
+			}
+			totalKills += match.Kills
+			totalDeaths += match.Deaths
+			totalAssists += match.Assists
+			totalVisionScore += int64(match.VisionScore)
+			totalCS += int64(match.TotalMinionsKilled)
+			totalGold += int64(match.GoldEarned)
+			totalDamage += int64(match.DamageToChampions)
+			totalKillParticipation += match.KillParticipation
+			totalGameTime += match.GameDuration
+		}
+
+		losses := len(roleMatches) - wins
+		winRate := float64(wins) / float64(len(roleMatches)) * 100
+
+		var roleKDA float64
+		if totalDeaths > 0 {
+			roleKDA = float64(totalKills+totalAssists) / float64(totalDeaths)
+		} else {
+			roleKDA = float64(totalKills + totalAssists)
+		}
+
+		roleStats[role] = RoleStats{
+			Role:                 role,
+			GamesPlayed:          len(roleMatches),
+			Wins:                 wins,
+			Losses:               losses,
+			WinRate:              winRate,
+			TotalKills:           totalKills,
+			TotalDeaths:          totalDeaths,
+			TotalAssists:         totalAssists,
+			AvgKills:             float64(totalKills) / float64(len(roleMatches)),
+			AvgDeaths:            float64(totalDeaths) / float64(len(roleMatches)),
+			AvgAssists:           float64(totalAssists) / float64(len(roleMatches)),
+			RoleKDA:              roleKDA,
+			AvgVisionScore:       float64(totalVisionScore) / float64(len(roleMatches)),
+			AvgCSPerMin:          (float64(totalCS) / float64(totalGameTime)) * 60,
+			AvgGoldPerMin:        (float64(totalGold) / float64(totalGameTime)) * 60,
+			AvgDamageToChampions: float64(totalDamage) / float64(len(roleMatches)),
+			AvgKillParticipation: totalKillParticipation / float64(len(roleMatches)),
+		}
+	}
+
+	return roleStats
+}
+
+// calculateChampionStats computes statistics grouped by champion
+func calculateChampionStats(matches []PlayerMatchStats) map[string]ChampionStats {
+	championMap := make(map[string][]PlayerMatchStats)
+
+	// Group matches by champion
+	for _, match := range matches {
+		championMap[match.ChampionName] = append(championMap[match.ChampionName], match)
+	}
+
+	championStats := make(map[string]ChampionStats)
+	for championName, championMatches := range championMap {
+		if len(championMatches) == 0 {
+			continue
+		}
+
+		var wins, totalKills, totalDeaths, totalAssists int
+		var totalVisionScore, totalCS, totalGold, totalDamage int64
+		var totalKillParticipation float64
+		var totalGameTime int64
+		var bestKDA, worstKDA float64
+		var lastPlayed int64
+		var championID int
+
+		bestKDA = -1      // Initialize to impossible value
+		worstKDA = 999999 // Initialize to very high value
+
+		for i, match := range championMatches {
+			if i == 0 {
+				championID = match.ChampionID
+				lastPlayed = match.GameCreation
+			}
+
+			if match.GameCreation > lastPlayed {
+				lastPlayed = match.GameCreation
+			}
+
+			if match.Win {
+				wins++
+			}
+			totalKills += match.Kills
+			totalDeaths += match.Deaths
+			totalAssists += match.Assists
+			totalVisionScore += int64(match.VisionScore)
+			totalCS += int64(match.TotalMinionsKilled)
+			totalGold += int64(match.GoldEarned)
+			totalDamage += int64(match.DamageToChampions)
+			totalKillParticipation += match.KillParticipation
+			totalGameTime += match.GameDuration
+
+			// Track best and worst KDA
+			if match.KDA > bestKDA {
+				bestKDA = match.KDA
+			}
+			if match.KDA < worstKDA {
+				worstKDA = match.KDA
+			}
+		}
+
+		losses := len(championMatches) - wins
+		winRate := float64(wins) / float64(len(championMatches)) * 100
+
+		var championKDA float64
+		if totalDeaths > 0 {
+			championKDA = float64(totalKills+totalAssists) / float64(totalDeaths)
+		} else {
+			championKDA = float64(totalKills + totalAssists)
+		}
+
+		championStats[championName] = ChampionStats{
+			ChampionName:         championName,
+			ChampionID:           championID,
+			GamesPlayed:          len(championMatches),
+			Wins:                 wins,
+			Losses:               losses,
+			WinRate:              winRate,
+			TotalKills:           totalKills,
+			TotalDeaths:          totalDeaths,
+			TotalAssists:         totalAssists,
+			AvgKills:             float64(totalKills) / float64(len(championMatches)),
+			AvgDeaths:            float64(totalDeaths) / float64(len(championMatches)),
+			AvgAssists:           float64(totalAssists) / float64(len(championMatches)),
+			ChampionKDA:          championKDA,
+			BestKDA:              bestKDA,
+			WorstKDA:             worstKDA,
+			AvgVisionScore:       float64(totalVisionScore) / float64(len(championMatches)),
+			AvgCSPerMin:          (float64(totalCS) / float64(totalGameTime)) * 60,
+			AvgGoldPerMin:        (float64(totalGold) / float64(totalGameTime)) * 60,
+			AvgDamageToChampions: float64(totalDamage) / float64(len(championMatches)),
+			AvgKillParticipation: totalKillParticipation / float64(len(championMatches)),
+			LastPlayed:           lastPlayed,
+		}
+	}
+
+	return championStats
+}
+
+// normalizeRole standardizes role names for consistent grouping, including game modes
+func normalizeRole(teamPosition string, gameMode string) string {
+	// For certain game modes, treat the game mode as the role
+	switch strings.ToUpper(gameMode) {
+	case "ARAM":
+		return "ARAM"
+	case "CHERRY":
+		return "Arena"
+	}
+
+	// For other game modes, use traditional role mapping
+	switch strings.ToUpper(teamPosition) {
+	case "TOP":
+		return "Top"
+	case "JUNGLE":
+		return "Jungle"
+	case "MIDDLE", "MID":
+		return "Mid"
+	case "BOTTOM", "BOT":
+		return "Bot"
+	case "UTILITY", "SUPPORT":
+		return "Support"
+	default:
+		if teamPosition == "" {
+			return "Unknown"
+		}
+		return teamPosition
+	}
+}
+
+// fetchRecentGamesSummary gets comprehensive match summary with caching
+func fetchRecentGamesSummary(app *GlobalAppData, userRegion, gameName, tagLine string, count, queueID int) (*RecentGamesSummary, error) {
+	// First fetch the regular user performance data
+	userPerformance, err := fetchAndStoreUserPerformance(app, userRegion, gameName, tagLine, count, queueID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch user performance: %w", err)
+	}
+
+	// Calculate comprehensive summary
+	summary := calculateRecentGamesSummary(userPerformance.Matches, userPerformance.PUUID, userPerformance.Region, userPerformance.RiotID)
+
+	return summary, nil
+}

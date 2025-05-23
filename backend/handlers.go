@@ -261,3 +261,68 @@ func getPopularItemsHandler(app *GlobalAppData) http.HandlerFunc {
 		json.NewEncoder(w).Encode(itemIDs)
 	}
 }
+
+func getRecentGamesSummaryHandler(app *GlobalAppData) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		region := vars["region"]
+		gameName := vars["gameName"]
+		tagLine := vars["tagLine"]
+
+		countStr := r.URL.Query().Get("count")
+		queueIDStr := r.URL.Query().Get("queueId")
+
+		count := defaultMatchCount
+		if countStr != "" {
+			c, err := strconv.Atoi(countStr)
+			if err == nil && c > 0 && c <= 100 { // 100 max
+				count = c
+			} else if err != nil {
+				http.Error(w, "Invalid 'count' parameter", http.StatusBadRequest)
+				return
+			}
+		}
+
+		queueID := defaultQueueID
+		if queueIDStr != "" {
+			q, err := strconv.Atoi(queueIDStr)
+			if err == nil {
+				queueID = q
+			} else {
+				http.Error(w, "Invalid 'queueId' parameter", http.StatusBadRequest)
+				return
+			}
+		}
+
+		log.Printf("Handler: Received recent games summary request for %s#%s in region %s, count: %d, queueId: %d", gameName, tagLine, region, count, queueID)
+
+		if app.riotAPIKey == "" {
+			log.Println("Error: RIOT_API_KEY is not set.")
+			http.Error(w, "Server configuration error: Riot API Key not set.", http.StatusInternalServerError)
+			return
+		}
+
+		if app.staticData == nil {
+			log.Println("Static data not yet loaded, attempting to load now.")
+			err := populateStaticData(app)
+			if err != nil {
+				log.Printf("Error populating static data on demand: %v", err)
+				http.Error(w, "Error loading required game data. Please try again shortly.", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		summaryData, err := fetchRecentGamesSummary(app, region, gameName, tagLine, count, queueID)
+		if err != nil {
+			log.Printf("Error fetching recent games summary for %s#%s: %v", gameName, tagLine, err)
+			http.Error(w, fmt.Sprintf("Error fetching recent games summary: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(summaryData); err != nil {
+			log.Printf("Error encoding response for %s#%s: %v", gameName, tagLine, err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
+	}
+}

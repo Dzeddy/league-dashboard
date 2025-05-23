@@ -220,4 +220,81 @@ export interface StaticGameData {
     runes: Record<number, RuneInfo>;              // Keyed by Rune ID (int)
     summonerSpells: Record<string, SummonerSpellData>; // Keyed by Summoner Spell Key (string version of ID)
     latestVersion: string;
+}
+
+// Enhanced Recent Games Summary Types
+export interface RecentGamesSummary {
+    puuid: string;
+    region: string;
+    riotId: string;
+    totalMatches: number;
+    overallStats: OverallStats;
+    roleStats: Record<string, RoleStats>;
+    championStats: Record<string, ChampionStats>;
+    recentMatches: PlayerMatchStats[];
+    lastUpdated: number;
+}
+
+export interface OverallStats {
+    wins: number;
+    losses: number;
+    winRate: number;
+    totalKills: number;
+    totalDeaths: number;
+    totalAssists: number;
+    avgKills: number;
+    avgDeaths: number;
+    avgAssists: number;
+    overallKDA: number;
+    avgGameDuration: number;
+    totalGameTime: number;
+    avgVisionScore: number;
+    avgCSPerMin: number;
+    avgGoldPerMin: number;
+    avgDamageToChampions: number;
+    avgKillParticipation: number;
+}
+
+export interface RoleStats {
+    role: string;
+    gamesPlayed: number;
+    wins: number;
+    losses: number;
+    winRate: number;
+    totalKills: number;
+    totalDeaths: number;
+    totalAssists: number;
+    avgKills: number;
+    avgDeaths: number;
+    avgAssists: number;
+    roleKDA: number;
+    avgVisionScore: number;
+    avgCSPerMin: number;
+    avgGoldPerMin: number;
+    avgDamageToChampions: number;
+    avgKillParticipation: number;
+}
+
+export interface ChampionStats {
+    championName: string;
+    championId: number;
+    gamesPlayed: number;
+    wins: number;
+    losses: number;
+    winRate: number;
+    totalKills: number;
+    totalDeaths: number;
+    totalAssists: number;
+    avgKills: number;
+    avgDeaths: number;
+    avgAssists: number;
+    championKDA: number;
+    bestKDA: number;
+    worstKDA: number;
+    avgVisionScore: number;
+    avgCSPerMin: number;
+    avgGoldPerMin: number;
+    avgDamageToChampions: number;
+    avgKillParticipation: number;
+    lastPlayed: number;
 } 
