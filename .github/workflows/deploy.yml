@@ -8,6 +8,10 @@ on:
 jobs:
   build-and-deploy-frontend:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -23,6 +27,13 @@ jobs:
           npm run build
         working-directory: ./frontend
 
+      - name: Verify build output
+        run: |
+          echo "Contents of frontend directory:"
+          ls -la ./frontend/
+          echo "Contents of build directory:"
+          ls -la ./frontend/build/ || echo "Build directory does not exist"
+        
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
