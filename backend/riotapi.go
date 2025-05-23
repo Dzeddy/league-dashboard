@@ -21,25 +21,21 @@ import (
 const (
 	puuidCacheDuration           = 24 * time.Hour
 	matchListCacheDuration       = 1 * time.Hour
-	matchDetailsCacheDuration    = 7 * 24 * time.Hour // Cache match details for a week
-	userPerformanceCacheDuration = 30 * time.Minute   // How long to cache the full user performance object
+	matchDetailsCacheDuration    = 7 * 24 * time.Hour
+	userPerformanceCacheDuration = 30 * time.Minute
 	staticDataCacheDuration      = 24 * time.Hour
 	defaultTimeout               = 10 * time.Second
-	defaultMatchCount            = 25 // Number of matches to fetch by default
-	defaultQueueID               = 0  // 0 will now mean all queues. Specific IDs: 420 Ranked, 440 Flex, 450 ARAM, 1700 Arena
+	defaultMatchCount            = 25
+	defaultQueueID               = 0
 	dataDragonBaseURL            = "https://ddragon.leagueoflegends.com"
 )
 
-// --- Riot API Interaction ---
-
 func getPUUID(app *GlobalAppData, region, gameName, tagLine string) (string, error) {
-	// Normalize region for Riot API (americas, asia, europe, sea)
 	apiRegion := getAPIRegion(region)
 	cacheKey := fmt.Sprintf("puuid:%s:%s:%s", apiRegion, strings.ToLower(gameName), strings.ToLower(tagLine))
 
 	val, err := app.redisClient.Get(context.Background(), cacheKey).Result()
 	if err == redis.Nil {
-		// Cache miss
 		url := fmt.Sprintf("https://%s.api.riotgames.com/riot/account/v1/accounts/by-riot-id/%s/%s", apiRegion, gameName, tagLine)
 		req, _ := http.NewRequest("GET", url, nil)
 		req.Header.Set("X-Riot-Token", app.riotAPIKey)
@@ -72,7 +68,7 @@ func getPUUID(app *GlobalAppData, region, gameName, tagLine string) (string, err
 	} else if err != nil {
 		return "", fmt.Errorf("failed to get PUUID from cache: %w", err)
 	}
-	return val, nil // Cache hit
+	return val, nil
 }
 
 func getMatchIDs(app *GlobalAppData, region, puuid string, count int, queueID int, startTime int64) ([]string, error) {
@@ -81,7 +77,6 @@ func getMatchIDs(app *GlobalAppData, region, puuid string, count int, queueID in
 
 	val, err := app.redisClient.Get(context.Background(), cacheKey).Result()
 	if err == redis.Nil {
-		// Cache miss
 		url := fmt.Sprintf("https://%s.api.riotgames.com/lol/match/v5/matches/by-puuid/%s/ids?count=%d", apiRegion, puuid, count)
 		if queueID != 0 {
 			url += fmt.Sprintf("&queue=%d", queueID)
@@ -132,7 +127,6 @@ func getMatchDetails(app *GlobalAppData, region, matchID string) (*MatchDto, err
 
 	val, err := app.redisClient.Get(context.Background(), cacheKey).Result()
 	if err == redis.Nil {
-		// Cache miss
 		url := fmt.Sprintf("https://%s.api.riotgames.com/lol/match/v5/matches/%s", apiRegion, matchID)
 		req, _ := http.NewRequest("GET", url, nil)
 		req.Header.Set("X-Riot-Token", app.riotAPIKey)
@@ -145,15 +139,13 @@ func getMatchDetails(app *GlobalAppData, region, matchID string) (*MatchDto, err
 
 		if resp.StatusCode != http.StatusOK {
 			bodyBytes, _ := io.ReadAll(resp.Body)
-			// It's possible a match ID from a list is no longer available or was bad
 			if resp.StatusCode == http.StatusNotFound {
 				log.Printf("Match %s not found in region %s, skipping.", matchID, apiRegion)
-				return nil, nil // Return nil, nil to indicate skippable error
+				return nil, nil
 			}
 			return nil, fmt.Errorf("match details request for %s failed with status %d: %s", matchID, resp.StatusCode, string(bodyBytes))
 		}
 
-		// Read into byte slice first for caching, then decode
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read match details response body for %s: %w", matchID, err)
@@ -173,15 +165,12 @@ func getMatchDetails(app *GlobalAppData, region, matchID string) (*MatchDto, err
 		return nil, fmt.Errorf("failed to get match details for %s from cache: %w", matchID, err)
 	}
 
-	// Cache hit, deserialize JSON string
 	var match MatchDto
 	if err := json.Unmarshal([]byte(val), &match); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal cached match details for %s: %w", matchID, err)
 	}
 	return &match, nil
 }
-
-// --- Data Processing & Storage ---
 
 func extractPlayerMatchStats(matchData *MatchDto, playerPUUID string, app *GlobalAppData) (*PlayerMatchStats, error) {
 	if matchData == nil || matchData.Info.Participants == nil {
@@ -204,18 +193,14 @@ func extractPlayerMatchStats(matchData *MatchDto, playerPUUID string, app *Globa
 	if playerParticipant.Deaths > 0 {
 		kda = float64(playerParticipant.Kills+playerParticipant.Assists) / float64(playerParticipant.Deaths)
 	} else {
-		kda = float64(playerParticipant.Kills + playerParticipant.Assists) // Infinite KDA if 0 deaths
+		kda = float64(playerParticipant.Kills + playerParticipant.Assists)
 	}
 
 	killParticipation := 0.0
 	if playerParticipant.Challenges != nil {
-		// Riot API might not always provide this directly in the simplified DTO, ensure it's calculated if missing
-		// We would need team total kills for accurate Kill Participation if not directly provided by API.
-		// For now, we use the direct value if available.
 		killParticipation = playerParticipant.Challenges.KillParticipation
 	}
 
-	// Ensure champion name is populated
 	championName := playerParticipant.ChampionName
 	if championName == "" && app.staticData != nil && app.staticData.Champions != nil {
 		if champData, ok := app.staticData.Champions[strconv.Itoa(playerParticipant.ChampionID)]; ok {
@@ -224,19 +209,17 @@ func extractPlayerMatchStats(matchData *MatchDto, playerPUUID string, app *Globa
 	}
 
 	stats := &PlayerMatchStats{
-		MatchID:            matchData.Metadata.MatchID,
-		GameMode:           matchData.Info.GameMode,
-		GameCreation:       matchData.Info.GameCreation,
-		GameDuration:       matchData.Info.GameDuration,
-		ChampionName:       championName, // Will be populated by Data Dragon later if not in match data
-		ChampionID:         playerParticipant.ChampionID,
-		Win:                playerParticipant.Win,
-		Kills:              playerParticipant.Kills,
-		Deaths:             playerParticipant.Deaths,
-		Assists:            playerParticipant.Assists,
-		KDA:                kda,
-		KillParticipation:  killParticipation, // This might need calculation if not directly available
-		TotalMinionsKilled: playerParticipant.TotalMinionsKilled + playerParticipant.NeutralMinionsKilled,
+		MatchID:      matchData.Metadata.MatchID,
+		GameMode:     matchData.Info.GameMode,
+		GameCreation: matchData.Info.GameCreation,
+		GameDuration: matchData.Info.GameDuration,
+		ChampionName: championName, ChampionID: playerParticipant.ChampionID,
+		Win:               playerParticipant.Win,
+		Kills:             playerParticipant.Kills,
+		Deaths:            playerParticipant.Deaths,
+		Assists:           playerParticipant.Assists,
+		KDA:               kda,
+		KillParticipation: killParticipation, TotalMinionsKilled: playerParticipant.TotalMinionsKilled + playerParticipant.NeutralMinionsKilled,
 		VisionScore:        playerParticipant.VisionScore,
 		GoldEarned:         playerParticipant.GoldEarned,
 		TeamPosition:       playerParticipant.TeamPosition,
@@ -249,7 +232,6 @@ func extractPlayerMatchStats(matchData *MatchDto, playerPUUID string, app *Globa
 		TotalDamageTaken:   playerParticipant.TotalDamageTaken,
 		TeamID:             playerParticipant.TeamID,
 		QueueID:            matchData.Info.QueueID,
-		// FullMatchData:      &matchData.Info, // Optional: Store full data for deeper analysis later
 	}
 
 	if playerParticipant.Perks != nil && len(playerParticipant.Perks.Styles) > 0 {
@@ -267,7 +249,7 @@ func extractPlayerMatchStats(matchData *MatchDto, playerPUUID string, app *Globa
 }
 
 func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagLine string, count, queueID int) (*UserPerformance, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout*time.Duration(count+5)) // Adjust timeout based on potential number of API calls
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout*time.Duration(count+5))
 	defer cancel()
 
 	puuid, err := getPUUID(app, userRegion, gameName, tagLine)
@@ -275,18 +257,14 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 		return nil, fmt.Errorf("error getting PUUID: %w", err)
 	}
 
-	// Try to fetch from MongoDB first (acts as a persistent cache)
 	collection := app.mongoClient.Database(app.mongoDatabase).Collection("userperformances")
 	var cachedPerformance UserPerformance
-	cacheKeyDB := fmt.Sprintf("%s_%s", userRegion, puuid) // For DB lookup
-
-	// Check Redis first for the whole UserPerformance object
+	cacheKeyDB := fmt.Sprintf("%s_%s", userRegion, puuid)
 	redisCacheKey := fmt.Sprintf("userperformance:%s", cacheKeyDB)
 	val, err := app.redisClient.Get(ctx, redisCacheKey).Result()
 	if err == nil {
 		if err := json.Unmarshal([]byte(val), &cachedPerformance); err == nil {
 			log.Printf("User performance for %s loaded from Redis cache.", puuid)
-			// Only return if enough matches are cached
 			if len(cachedPerformance.Matches) >= count {
 				if len(cachedPerformance.Matches) > count {
 					trimmed := *&cachedPerformance
@@ -302,14 +280,11 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 
 	err = collection.FindOne(ctx, bson.M{"_id": puuid, "region": userRegion}).Decode(&cachedPerformance)
 	if err == nil && len(cachedPerformance.Matches) >= count && time.Now().Unix()-cachedPerformance.UpdatedAt < int64(userPerformanceCacheDuration/time.Second)/2 {
-		// If found in DB, relatively fresh, and has enough matches, return it
-		// and update Redis cache.
 		log.Printf("User performance for %s loaded from MongoDB.", puuid)
 		perfJSON, _ := json.Marshal(cachedPerformance)
 		if err := app.redisClient.Set(ctx, redisCacheKey, perfJSON, userPerformanceCacheDuration).Err(); err != nil {
 			log.Printf("Warning: failed to update Redis cache for user performance %s: %v", puuid, err)
 		}
-		// Trim matches to requested count if needed
 		if len(cachedPerformance.Matches) > count {
 			trimmed := *&cachedPerformance
 			trimmed.Matches = cachedPerformance.Matches[:count]
@@ -323,8 +298,6 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 
 	log.Printf("Fetching fresh match data for %s#%s (%s)", gameName, tagLine, puuid)
 
-	// Fetch latest season's start time if applicable (example, can be made dynamic or configurable)
-	// For now, not using a specific start time to get most recent games.
 	var seasonStartTime int64 = 0
 
 	matchIDs, err := getMatchIDs(app, userRegion, puuid, count, queueID, seasonStartTime)
@@ -334,7 +307,6 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 
 	if len(matchIDs) == 0 {
 		log.Printf("No match IDs found for %s in region %s with queue %d", puuid, userRegion, queueID)
-		// Return an empty performance object or the one from DB if it exists and is just outdated
 		if cachedPerformance.PUUID != "" {
 			cachedPerformance.UpdatedAt = time.Now().Unix()
 			return &cachedPerformance, nil
@@ -347,9 +319,9 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 		matchData, err := getMatchDetails(app, userRegion, matchID)
 		if err != nil {
 			log.Printf("Error getting match details for %s: %v. Skipping this match.", matchID, err)
-			continue // Skip this match if there's an error
+			continue
 		}
-		if matchData == nil { // Case where match was not found (e.g. 404), already logged in getMatchDetails
+		if matchData == nil {
 			continue
 		}
 
@@ -363,7 +335,6 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 		}
 	}
 
-	// Sort matches by game creation time descending (newest first)
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].GameCreation > matches[j].GameCreation
 	})
@@ -376,15 +347,12 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 		UpdatedAt: time.Now().Unix(),
 	}
 
-	// Store/Update in MongoDB
 	opts := options.Update().SetUpsert(true)
 	_, err = collection.UpdateOne(ctx, bson.M{"_id": puuid, "region": userRegion}, bson.M{"$set": performance}, opts)
 	if err != nil {
 		log.Printf("Warning: Failed to store user performance for %s in MongoDB: %v", puuid, err)
-		// Don't fail the whole request if DB store fails, but log it
 	}
 
-	// Update Redis cache
 	perfJSON, err := json.Marshal(performance)
 	if err != nil {
 		log.Printf("Warning: Failed to marshal performance data for Redis for %s: %v", puuid, err)
@@ -397,7 +365,6 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 	return &performance, nil
 }
 
-// --- Static Data (Data Dragon) ---
 func loadDataDragonVersions(app *GlobalAppData) ([]string, error) {
 	url := fmt.Sprintf("%s/api/versions.json", dataDragonBaseURL)
 	req, _ := http.NewRequest("GET", url, nil)
@@ -526,8 +493,6 @@ func loadSummonerSpells(app *GlobalAppData, version string) (map[string]Summoner
 }
 
 func loadRunes(app *GlobalAppData, version string) (map[int]RuneInfo, error) {
-	// Rune data is typically in a structure of rune paths, each containing runes.
-	// We'll flatten this into a map of RuneID -> RuneInfo for easier lookup.
 	cacheKey := fmt.Sprintf("ddragon:runesreforged:%s", version)
 	val, err := app.redisClient.Get(context.Background(), cacheKey).Result()
 	if err == nil {
@@ -590,12 +555,8 @@ func populateStaticData(app *GlobalAppData) error {
 		return fmt.Errorf("error loading champions: %w", err)
 	}
 
-	// Create a map of champion ID (int) to champion Name (string)
-	// championIDToNameMap := make(map[int]string)
-	championKeyToDataMap := make(map[string]ChampionData) // Keyed by string version of ID
+	championKeyToDataMap := make(map[string]ChampionData)
 	for _, champ := range champions {
-		// champKey, _ := strconv.Atoi(champ.Key)
-		// championIDToNameMap[champKey] = champ.Name
 		championKeyToDataMap[champ.Key] = champ
 	}
 
@@ -608,7 +569,6 @@ func populateStaticData(app *GlobalAppData) error {
 	if err != nil {
 		return fmt.Errorf("error loading summoner spells: %w", err)
 	}
-	// Create a map of summoner spell Key (string int) to SummonerSpellData
 	summonerSpellsByKey := make(map[string]SummonerSpellData)
 	for _, spell := range summonerSpells {
 		summonerSpellsByKey[spell.Key] = spell
@@ -626,14 +586,10 @@ func populateStaticData(app *GlobalAppData) error {
 		SummonerSpells: summonerSpellsByKey,
 		LatestVersion:  latestVersion,
 	}
-	// app.championIDMap = championIDToNameMap
 	log.Println("Static data populated successfully.")
 	return nil
 }
 
-// --- Utility Functions ---
-
-// getAPIRegion maps a general region (e.g., "na1", "euw1") to a Riot API routing region (americas, asia, europe, sea).
 func getAPIRegion(region string) string {
 	lowerRegion := strings.ToLower(region)
 	switch {
@@ -646,8 +602,6 @@ func getAPIRegion(region string) string {
 	case strings.HasPrefix(lowerRegion, "sg"), strings.HasPrefix(lowerRegion, "ph"), strings.HasPrefix(lowerRegion, "th"), strings.HasPrefix(lowerRegion, "vn"), strings.HasPrefix(lowerRegion, "tw"):
 		return "sea"
 	default:
-		// Fallback to a common one, or handle error. For now, assume a sensible default might be based on input or require specific handling.
-		// This should ideally be validated earlier.
 		log.Printf("Warning: Unknown region prefix for '%s', defaulting to 'americas' for API routing. Please check region mapping.", region)
 		return "americas"
 	}

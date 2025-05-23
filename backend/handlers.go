@@ -21,14 +21,13 @@ func getPlayerPerformanceHandler(app *GlobalAppData) http.HandlerFunc {
 		gameName := vars["gameName"]
 		tagLine := vars["tagLine"]
 
-		// Query parameters for count and queueID
 		countStr := r.URL.Query().Get("count")
-		queueIDStr := r.URL.Query().Get("queueId") // Match Riot's typical casing
+		queueIDStr := r.URL.Query().Get("queueId")
 
 		count := defaultMatchCount
 		if countStr != "" {
 			c, err := strconv.Atoi(countStr)
-			if err == nil && c > 0 && c <= 100 { // Cap count at 100 as per Riot API limits
+			if err == nil && c > 0 && c <= 100 { // 100 max
 				count = c
 			} else if err != nil {
 				http.Error(w, "Invalid 'count' parameter", http.StatusBadRequest)
@@ -36,11 +35,11 @@ func getPlayerPerformanceHandler(app *GlobalAppData) http.HandlerFunc {
 			}
 		}
 
-		queueID := defaultQueueID // Default to Draft Pick (400)
+		queueID := defaultQueueID
 		if queueIDStr != "" {
 			q, err := strconv.Atoi(queueIDStr)
 			if err == nil {
-				queueID = q // User can specify any queue ID they want to filter by
+				queueID = q
 			} else {
 				http.Error(w, "Invalid 'queueId' parameter", http.StatusBadRequest)
 				return
@@ -55,7 +54,6 @@ func getPlayerPerformanceHandler(app *GlobalAppData) http.HandlerFunc {
 			return
 		}
 
-		// Check if static data is loaded, if not, attempt to load it
 		if app.staticData == nil {
 			log.Println("Static data not yet loaded, attempting to load now.")
 			err := populateStaticData(app)
@@ -81,13 +79,10 @@ func getPlayerPerformanceHandler(app *GlobalAppData) http.HandlerFunc {
 	}
 }
 
-// Static data handler to provide champion, item, etc. details to frontend
 func getStaticDataHandler(app *GlobalAppData) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if app.staticData == nil {
 			log.Println("Static data requested but not loaded yet.")
-			// Optionally, attempt to load it here if it makes sense for your app flow
-			// For now, just return an error or an empty object if not ready.
 			err := populateStaticData(app)
 			if err != nil {
 				log.Printf("Error populating static data on demand for /static-data: %v", err)
@@ -99,8 +94,8 @@ func getStaticDataHandler(app *GlobalAppData) http.HandlerFunc {
 		response := struct {
 			Champions      map[string]ChampionData      `json:"champions"`
 			Items          map[string]ItemData          `json:"items"`
-			Runes          map[int]RuneInfo             `json:"runes"`          // Keyed by Rune ID (int)
-			SummonerSpells map[string]SummonerSpellData `json:"summonerSpells"` // Keyed by Summoner Spell Key (string version of ID)
+			Runes          map[int]RuneInfo             `json:"runes"`
+			SummonerSpells map[string]SummonerSpellData `json:"summonerSpells"`
 			LatestVersion  string                       `json:"latestVersion"`
 		}{
 			Champions:      app.staticData.Champions,
@@ -118,7 +113,6 @@ func getStaticDataHandler(app *GlobalAppData) http.HandlerFunc {
 	}
 }
 
-// healthCheckHandler for basic API health status
 func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]string{"status": "ok", "timestamp": time.Now().String()}
@@ -157,37 +151,34 @@ const popularItemsCacheKey = "popular_items_v1"
 const popularItemsCacheTTL = 24 * time.Hour
 const topNPopularItems = 50
 
-// Struct to hold the result of the MongoDB aggregation
 type popularItemDBResult struct {
-	ItemID int `bson:"_id"` // The _id from $group stage will be the itemID
+	ItemID int `bson:"_id"`
 	Count  int `bson:"count"`
 }
 
-// fetchTopPopularItemIDsFromDB queries MongoDB to get the top N most frequent item IDs.
 func fetchTopPopularItemIDsFromDB(app *GlobalAppData, count int) ([]int, error) {
 	log.Printf("Database: Fetching top %d popular item IDs from MongoDB.", count)
 
-	collection := app.mongoClient.Database(app.mongoDatabase).Collection("userperformances") // Correct collection name
+	collection := app.mongoClient.Database(app.mongoDatabase).Collection("userperformances")
 
-	// Define the aggregation pipeline for UserPerformance documents
 	pipeline := []bson.M{
-		{"$unwind": "$matches"},       // Unwind the matches array in UserPerformance documents
-		{"$unwind": "$matches.items"}, // Unwind the items array in each match
+		{"$unwind": "$matches"},
+		{"$unwind": "$matches.items"},
 		{"$match": bson.M{
-			"matches.items": bson.M{"$ne": 0}, // Filter out empty item slots (assuming 0 means no item)
+			"matches.items": bson.M{"$ne": 0},
 		}},
 		{"$group": bson.M{
-			"_id":   "$matches.items",  // Group by item ID
-			"count": bson.M{"$sum": 1}, // Count occurrences
+			"_id":   "$matches.items",
+			"count": bson.M{"$sum": 1},
 		}},
-		{"$sort": bson.M{"count": -1}}, // Sort by count descending
+		{"$sort": bson.M{"count": -1}},
 		{"$limit": count},
 		{"$project": bson.M{
-			"_id": 1, // We only need the item ID, which is in _id field after $group
+			"_id": 1,
 		}},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // Context for the DB operation
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	cursor, err := collection.Aggregate(ctx, pipeline)
@@ -210,8 +201,6 @@ func fetchTopPopularItemIDsFromDB(app *GlobalAppData, count int) ([]int, error) 
 
 	if len(itemIDs) == 0 {
 		log.Println("No popular items found from DB after aggregation.")
-		// You might return a default list or an empty list based on preference
-		// For now, returning empty list as per previous logic
 		return []int{}, nil
 	}
 
@@ -223,9 +212,8 @@ func getPopularItemsHandler(app *GlobalAppData) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
-		// 1. Try to get from Redis cache
 		cachedItemsJSON, err := app.redisClient.Get(ctx, popularItemsCacheKey).Result()
-		if err == nil { // Cache hit
+		if err == nil {
 			var popularItemIDs []int
 			if err := json.Unmarshal([]byte(cachedItemsJSON), &popularItemIDs); err == nil {
 				log.Println("Cache hit for popular items.")
@@ -234,13 +222,12 @@ func getPopularItemsHandler(app *GlobalAppData) http.HandlerFunc {
 				return
 			}
 			log.Printf("Error unmarshalling popular items from Redis: %v. Proceeding to fetch from DB.", err)
-		} else if err != redis.Nil { // Redis error, not just a cache miss
+		} else if err != redis.Nil {
 			log.Printf("Error fetching popular items from Redis: %v. Proceeding to fetch from DB.", err)
-		} else { // Cache miss (err == redis.Nil)
+		} else {
 			log.Println("Cache miss for popular items. Fetching from DB.")
 		}
 
-		// 2. Cache miss or error, fetch from DB (placeholder)
 		itemIDs, dbErr := fetchTopPopularItemIDsFromDB(app, topNPopularItems)
 		if dbErr != nil {
 			log.Printf("Error fetching popular items from DB: %v", dbErr)
@@ -250,17 +237,14 @@ func getPopularItemsHandler(app *GlobalAppData) http.HandlerFunc {
 
 		if len(itemIDs) == 0 {
 			log.Println("No popular items found from DB (or placeholder returned empty).")
-			// Decide if to cache an empty list or return an error/empty list without caching
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode([]int{}) // Return empty list
 			return
 		}
 
-		// 3. Store in Redis
 		newCachedItemsJSON, err := json.Marshal(itemIDs)
 		if err != nil {
 			log.Printf("Error marshalling popular items for Redis cache: %v", err)
-			// Still return the data to the client even if caching fails
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(itemIDs)
 			return
