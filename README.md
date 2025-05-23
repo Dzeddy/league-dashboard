@@ -167,12 +167,40 @@ The application uses MongoDB with the following main collections:
 
 ### Environment Variables
 
+#### Backend Configuration
+
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `RIOT_API_KEY` | Your Riot Games API key | *Required* |
 | `MONGO_URI` | MongoDB connection string | `mongodb://localhost:27017` |
 | `MONGO_DATABASE` | MongoDB database name | `leagueperformancetracker` |
 | `REDIS_ADDR` | Redis server address | `localhost:6379` |
+
+#### Frontend Configuration
+
+The frontend requires environment variables prefixed with `REACT_APP_` to be accessible in the browser.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `REACT_APP_API_BASE_URL` | Backend API base URL | `http://localhost:8080/api` |
+
+**Setting up frontend environment variables:**
+
+1. Create a `.env.local` file in the `frontend/` directory:
+   ```bash
+   cd frontend
+   echo "REACT_APP_API_BASE_URL=http://localhost:8080/api" > .env.local
+   ```
+
+2. For production deployment, set the environment variable to your production API URL:
+   ```bash
+   REACT_APP_API_BASE_URL=https://your-api-domain.com/api
+   ```
+
+**Important Notes:**
+- Frontend environment variables are embedded at build time, not runtime
+- You must rebuild the React application after changing environment variables
+- See `frontend/README.env.md` for detailed configuration instructions
 
 ### Supported Regions
 
