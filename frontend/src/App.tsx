@@ -265,11 +265,19 @@ function App() {
   // Helper: Map teamPosition/lane to role icon URL
   const getRoleIconURL = (role: string) => {
     const roleMap: { [key: string]: string } = {
-      TOP: './public/roles/64px-Top_icon.webp',
-      JUNGLE: './public/roles/64px-Jungle_icon.webp',
-      MIDDLE: './public/roles/64px-Middle_icon.webp',
-      BOTTOM: './public/roles/64px-Bottom_icon.webp',
-      UTILITY: './public/roles/64px-Support_icon.webp',
+      TOP: '/roles/64px-Top_icon.webp',
+      JUNGLE: '/roles/64px-Jungle_icon.webp',
+      MID: '/roles/64px-Middle_icon.webp',
+      MIDDLE: '/roles/64px-Middle_icon.webp',
+      BOT: '/roles/64px-Bottom_icon.webp',
+      BOTTOM: '/roles/64px-Bottom_icon.webp',
+      ADC: '/roles/64px-Bottom_icon.webp',
+      SUPPORT: '/roles/64px-Support_icon.webp',
+      UTILITY: '/roles/64px-Support_icon.webp',
+      // Special game modes
+      ARENA: '/roles/64px-Jungle_icon.webp',
+      CHERRY: '/roles/64px-Jungle_icon.webp',
+      ARAM: '/roles/64px-Middle_icon.webp',
       NONE: '',
     };
     return roleMap[role?.toUpperCase()] || '';
@@ -885,15 +893,20 @@ function App() {
               <div key={role} className="role-card">
                 <div className="role-header">
                   <div className="role-icon">
-                    <img 
-                      src={getRoleIconURL(role)} 
-                      alt={role} 
-                      className="role-image"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                        // Could add a fallback icon here if needed
-                      }}
-                    />
+                    {(() => {
+                      const roleIconUrl = getRoleIconURL(role);
+                      return roleIconUrl ? (
+                        <img 
+                          src={roleIconUrl} 
+                          alt={role} 
+                          className="role-image"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            // Could add a fallback icon here if needed
+                          }}
+                        />
+                      ) : null;
+                    })()}
                   </div>
                   <div className="role-info">
                     <h3>{getRoleDisplayName(role)}</h3>
