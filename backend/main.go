@@ -17,7 +17,6 @@ import (
 
 var app GlobalAppData
 
-// CORS middleware
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
@@ -37,12 +36,10 @@ func corsMiddleware(next http.Handler) http.Handler {
 func main() {
 	log.Println("Starting League Performance Tracker backend...")
 
-	// Load .env file
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file")
 	}
 
-	// Configuration
 	app.riotAPIKey = os.Getenv("RIOT_API_KEY")
 	if app.riotAPIKey == "" {
 		log.Fatal("CRITICAL: RIOT_API_KEY environment variable not set.")
@@ -65,10 +62,8 @@ func main() {
 		log.Println("REDIS_ADDR not set, defaulting to localhost:6379")
 	}
 
-	// Initialize HTTP client
 	app.httpClient = &http.Client{Timeout: defaultTimeout}
 
-	// Initialize Redis Client
 	app.redisClient = redis.NewClient(&redis.Options{
 		Addr: redisAddr,
 	})
@@ -79,7 +74,6 @@ func main() {
 	}
 	log.Println("Successfully connected to Redis.")
 
-	// Initialize MongoDB Client
 	ctxMongo, cancelMongo := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelMongo()
 	clientOptions := options.Client().ApplyURI(mongoURI)
@@ -88,14 +82,11 @@ func main() {
 	if errMongo != nil {
 		log.Fatalf("Could not connect to MongoDB: %v", errMongo)
 	}
-	// Ping MongoDB
 	if err := app.mongoClient.Ping(ctxMongo, readpref.Primary()); err != nil {
 		log.Fatalf("Could not ping MongoDB: %v", err)
 	}
 	log.Println("Successfully connected to MongoDB.")
 
-	// Populate static data (champions, items, etc.) on startup.
-	// This is now a blocking call to ensure data is ready before server starts.
 	log.Println("Initiating population of static data...")
 	if err := populateStaticData(&app); err != nil {
 		log.Fatalf("CRITICAL: Failed to populate static data on startup: %v. Application cannot start correctly.", err)
@@ -103,30 +94,19 @@ func main() {
 		log.Println("Static data population complete. All static data is preloaded and cached in memory.")
 	}
 
-	// Setup Router
 	r := mux.NewRouter()
 
-	// Apply CORS middleware to all routes
 	r.Use(corsMiddleware)
 
 	apiRouter := r.PathPrefix("/api").Subrouter()
-	// Apply CORS middleware to API routes as well to ensure it's not lost in subrouter
 	apiRouter.Use(corsMiddleware)
 
-	// API Endpoints
 	apiRouter.HandleFunc("/health", healthCheckHandler).Methods("GET", "OPTIONS")
 	apiRouter.HandleFunc("/player/{region}/{gameName}/{tagLine}/matches", getPlayerPerformanceHandler(&app)).Methods("GET", "OPTIONS")
 	apiRouter.HandleFunc("/static-data", getStaticDataHandler(&app)).Methods("GET", "OPTIONS")
 	apiRouter.HandleFunc("/match/{region}/{matchId}", getMatchDetailsHandler(&app)).Methods("GET", "OPTIONS")
 
-	// Endpoint for popular items, for frontend preloading
 	apiRouter.HandleFunc("/popular-items", getPopularItemsHandler(&app)).Methods("GET", "OPTIONS")
-
-	// Serve frontend (React build) - This needs to be configured after `npm run build` in frontend
-	// For development, React's dev server (npm start) will handle serving the frontend.
-	// For production, you would serve the static files from `frontend/build`.
-	// Example (you might need to adjust the path based on your final setup):
-	// r.PathPrefix("/").Handler(http.FileServer(http.Dir("../frontend/build/")))
 
 	log.Println("Backend server starting on :8080")
 	srv := &http.Server{
