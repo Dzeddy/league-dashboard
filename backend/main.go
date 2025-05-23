@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -60,6 +61,7 @@ func main() {
 		mongoURI = "mongodb://localhost:27017"
 		log.Println("MONGO_URI not set, defaulting to mongodb://localhost:27017")
 	}
+
 	app.mongoDatabase = os.Getenv("MONGO_DATABASE")
 	if app.mongoDatabase == "" {
 		app.mongoDatabase = "leagueperformancetracker"
@@ -72,10 +74,28 @@ func main() {
 		log.Println("REDIS_ADDR not set, defaulting to localhost:6379")
 	}
 
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+	redisDB := os.Getenv("REDIS_DB")
+	redisDBNum := 0
+	if redisDB != "" {
+		// Parse Redis DB number if provided
+		if db, err := strconv.Atoi(redisDB); err == nil {
+			redisDBNum = db
+		}
+	}
+
+	if redisPassword != "" {
+		log.Println("Redis password authentication enabled")
+	} else {
+		log.Println("Redis password authentication disabled (no password set)")
+	}
+
 	app.httpClient = &http.Client{Timeout: defaultTimeout}
 
 	app.redisClient = redis.NewClient(&redis.Options{
-		Addr: redisAddr,
+		Addr:     redisAddr,
+		Password: redisPassword, // password from environment variable
+		DB:       redisDBNum,    // database number from environment variable
 	})
 	ctxRedis, cancelRedis := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelRedis()
