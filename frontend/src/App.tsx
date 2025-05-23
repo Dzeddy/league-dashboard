@@ -1,4 +1,4 @@
-import React, { useState, useEffect, FormEvent, useCallback } from 'react';
+import React, { useState, useEffect, FormEvent } from 'react';
 import axios from 'axios';
 import './App.css';
 import { UserPerformance, StaticGameData, PlayerMatchStats, RecentGamesSummary } from './types';
@@ -9,59 +9,19 @@ dayjs.extend(relativeTime);
 
 const API_BASE_URL = 'http://localhost:8080/api';
 
-interface AggregatedStats {
-  winRate: number;
-  wins: number;
-  losses: number;
-  matchesPlayed: number;
-  kda: number;
-  avgKills: number;
-  avgDeaths: number;
-  avgAssists: number;
-  totalKills: number;
-  totalDeaths: number;
-  totalAssists: number;
-}
-
-function calculateAggregatedStats(matches: PlayerMatchStats[]): AggregatedStats {
-  if (!matches || matches.length === 0) {
-    return {
-      winRate: 0, wins: 0, losses: 0, matchesPlayed: 0, kda: 0,
-      avgKills: 0, avgDeaths: 0, avgAssists: 0,
-      totalKills: 0, totalDeaths: 0, totalAssists: 0,
-    };
-  }
-
-  const totalMatches = matches.length;
-  const wins = matches.filter(m => m.win).length;
-  const losses = totalMatches - wins;
-  const winRate = totalMatches > 0 ? (wins / totalMatches) * 100 : 0;
-
-  const totalKills = matches.reduce((sum, m) => sum + m.kills, 0);
-  const totalDeaths = matches.reduce((sum, m) => sum + m.deaths, 0);
-  const totalAssists = matches.reduce((sum, m) => sum + m.assists, 0);
-
-  const avgKills = totalMatches > 0 ? totalKills / totalMatches : 0;
-  const avgDeaths = totalMatches > 0 ? totalDeaths / totalMatches : 0;
-  const avgAssists = totalMatches > 0 ? totalAssists / totalMatches : 0;
-
-  // KDA: (Kills + Assists) / Deaths. If Deaths is 0, treat as (Kills + Assists) / 1.
-  const kda = totalDeaths === 0 ? (totalKills + totalAssists) : (totalKills + totalAssists) / totalDeaths;
-
-  return {
-    winRate,
-    wins,
-    losses,
-    matchesPlayed: totalMatches,
-    kda,
-    avgKills,
-    avgDeaths,
-    avgAssists,
-    totalKills,
-    totalDeaths,
-    totalAssists,
-  };
-}
+// interface AggregatedStats {
+//   winRate: number;
+//   wins: number;
+//   losses: number;
+//   matchesPlayed: number;
+//   kda: number;
+//   avgKills: number;
+//   avgDeaths: number;
+//   avgAssists: number;
+//   totalKills: number;
+//   totalDeaths: number;
+//   totalAssists: number;
+// }
 
 function App() {
   const [gameName, setGameName] = useState('');
@@ -73,7 +33,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isStaticDataLoading, setIsStaticDataLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
+  // const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
   const [visibleMatches, setVisibleMatches] = useState(25);
   const [selectedMatch, setSelectedMatch] = useState<PlayerMatchStats | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -82,9 +42,9 @@ function App() {
   const [fullMatchData, setFullMatchData] = useState<any | null>(null);
   const [isMatchLoading, setIsMatchLoading] = useState(false);
 
-  // Derived stats
-  const [lifetimeStats, setLifetimeStats] = useState<AggregatedStats | null>(null);
-  const [currentSeasonStats, setCurrentSeasonStats] = useState<AggregatedStats | null>(null);
+  // Derived stats (these are calculated but will be used later for filtering/display)
+  // const [lifetimeStats, setLifetimeStats] = useState<AggregatedStats | null>(null);
+  // const [currentSeasonStats, setCurrentSeasonStats] = useState<AggregatedStats | null>(null);
   // const [filteredSeasonalStats, setFilteredSeasonalStats] = useState<AggregatedStats | null>(null);
 
   // Preload common items when static data is loaded
@@ -108,31 +68,27 @@ function App() {
     fetchAndSetPopularItems();
   }, [staticData]);
 
-  const preloadImage = useCallback((url: string, key: string) => {
-    if (!url || loadedImages.has(key)) return;
-    
-    const img = new Image();
-    img.onload = () => setLoadedImages(prev => new Set(prev).add(key));
-    img.onerror = () => setLoadedImages(prev => new Set(prev).add(key)); // Still mark as loaded to prevent infinite loading state
-    img.src = url;
-  }, [loadedImages]);
+  // const preloadImage = useCallback((url: string, key: string) => {
+  //   if (!url || loadedImages.has(key)) return;
+  //   
+  //   const img = new Image();
+  //   img.onload = () => setLoadedImages(prev => new Set(prev).add(key));
+  //   img.onerror = () => setLoadedImages(prev => new Set(prev).add(key)); // Still mark as loaded to prevent infinite loading state
+  //   img.src = url;
+  // }, [loadedImages]);
 
-  const isImageLoaded = useCallback((imageKey: string) => {
-    return loadedImages.has(imageKey);
-  }, [loadedImages]);
-
-  // Preload item images for a match
-  const preloadMatchItems = useCallback((match: PlayerMatchStats) => {
-    if (!staticData) return;
-    
-    match.items.forEach(itemId => {
-      const itemImageKey = `item-${itemId}`;
-      if (!isImageLoaded(itemImageKey)) {
-        const itemUrl = `${dataDragonBase}/${getItemImageURL(itemId)}`;
-        preloadImage(itemUrl, itemImageKey);
-      }
-    });
-  }, [staticData, isImageLoaded, preloadImage]);
+  // Preload item images for a match (unused but may be needed later)
+  // const preloadMatchItems = useCallback((match: PlayerMatchStats) => {
+  //   if (!staticData) return;
+  //   
+  //   match.items.forEach(itemId => {
+  //     const itemImageKey = `item-${itemId}`;
+  //     if (!isImageLoaded(itemImageKey)) {
+  //       const itemUrl = `${dataDragonBase}/${getItemImageURL(itemId)}`;
+  //       preloadImage(itemUrl, itemImageKey);
+  //     }
+  //   });
+  // }, [staticData, isImageLoaded, preloadImage]); // getItemImageURL is a stable function defined in the component
 
   // Fetch static data on component mount
   useEffect(() => {
@@ -156,9 +112,9 @@ function App() {
     if (playerData?.matches) {
       // For now, all stats are based on the fetched matches.
       // Filtering by selectedPlaylist or selectedSeason would happen here.
-      const allFetchedMatchesStats = calculateAggregatedStats(playerData.matches);
-      setLifetimeStats(allFetchedMatchesStats);
-      setCurrentSeasonStats(allFetchedMatchesStats); // Replace with actual current season logic if available
+      // const allFetchedMatchesStats = calculateAggregatedStats(playerData.matches);
+      // setLifetimeStats(allFetchedMatchesStats);
+      // setCurrentSeasonStats(allFetchedMatchesStats); // Replace with actual current season logic if available
       // setFilteredSeasonalStats(allFetchedMatchesStats); // Replace with specific season filtering
     }
   }, [playerData]);
@@ -178,8 +134,8 @@ function App() {
     setError(null);
     setPlayerData(null);
     setRecentGamesSummary(null);
-    setLifetimeStats(null);
-    setCurrentSeasonStats(null);
+    // setLifetimeStats(null);
+    // setCurrentSeasonStats(null);
 
     try {
       // Fetch both regular data and enhanced summary
@@ -280,16 +236,6 @@ function App() {
     return 'placeholder.png';
   };
 
-  const getRuneImageURL = (runeId: number) => {
-    if (!staticData || runeId === 0) return 'placeholder.png';
-    const rune = staticData.runes[runeId];
-    if (rune) {
-        // Icons in DDragon rune data are full paths already, e.g., "perk-images/Styles/Precision/PressTheAttack/PressTheAttack.png"
-        return `img/${rune.icon}`;
-    }
-    return 'placeholder.png';
-  };
-
   const formatGameDuration = (durationInSeconds: number): string => {
     const minutes = Math.floor(durationInSeconds / 60);
     const seconds = durationInSeconds % 60;
@@ -297,46 +243,6 @@ function App() {
   };
 
   const dataDragonBase = "https://ddragon.leagueoflegends.com/cdn";
-
-  const renderItemImage = (itemId: number, index: number, isTrinket: boolean = false) => {
-    // If itemId is 0, render a placeholder immediately
-    if (itemId === 0) {
-      return (
-        <div 
-          key={`item-${index}-${itemId}`} 
-          className={`item-container ${isTrinket ? 'trinket-container' : ''}`}
-        >
-          <div className="item-icon empty-item" />
-        </div>
-      );
-    }
-
-    const itemImageKey = `item-${itemId}`;
-    const itemUrl = staticData ? `${dataDragonBase}/${getItemImageURL(itemId)}` : '';
-    
-    // Start preloading if not already loaded
-    if (itemUrl && !isImageLoaded(itemImageKey)) {
-      preloadImage(itemUrl, itemImageKey);
-    }
-
-    return (
-      <div 
-        key={`item-${index}-${itemId}`} 
-        className={`item-container ${isTrinket ? 'trinket-container' : ''}`}
-      >
-        <img 
-          src={itemUrl}
-          alt={`Item ${itemId}`}
-          className={`item-icon ${!isImageLoaded(itemImageKey) ? 'loading' : ''} ${isTrinket ? 'trinket-icon' : ''}`}
-          onLoad={() => setLoadedImages(prev => new Set(prev).add(itemImageKey))}
-          onError={(e) => {
-            e.currentTarget.src = 'placeholder.png';
-            setLoadedImages(prev => new Set(prev).add(itemImageKey));
-          }}
-        />
-      </div>
-    );
-  };
 
   // Helper: Get display name for roles (including game modes)
   const getRoleDisplayName = (role: string) => {
@@ -358,125 +264,17 @@ function App() {
 
   // Helper: Map teamPosition/lane to role icon URL
   const getRoleIconURL = (role: string) => {
-    // Use local role icons from public/roles directory
     const roleMap: { [key: string]: string } = {
-      TOP: '/roles/64px-Top_icon.webp',
-      JUNGLE: '/roles/64px-Jungle_icon.webp',
-      MIDDLE: '/roles/64px-Middle_icon.webp',
-      MID: '/roles/64px-Middle_icon.webp',
-      BOTTOM: '/roles/64px-Bottom_icon.webp',
-      BOT: '/roles/64px-Bottom_icon.webp',
-      ADC: '/roles/64px-Bottom_icon.webp',
-      SUPPORT: '/roles/64px-Support_icon.webp',
-      UTILITY: '/roles/64px-Support_icon.webp',
-      // Game mode icons (using existing icons as placeholders for now)
-      ARAM: '/roles/64px-Middle_icon.webp', // Use middle icon for ARAM
-      ARENA: '/roles/64px-Jungle_icon.webp', // Use jungle icon for Arena
+      TOP: './public/roles/64px-Top_icon.webp',
+      JUNGLE: './public/roles/64px-Jungle_icon.webp',
+      MIDDLE: './public/roles/64px-Middle_icon.webp',
+      BOTTOM: './public/roles/64px-Bottom_icon.webp',
+      UTILITY: './public/roles/64px-Support_icon.webp',
       NONE: '',
     };
     return roleMap[role?.toUpperCase()] || '';
   };
 
-  const renderMatchCard = (match: PlayerMatchStats) => {
-    // Preload items for this match
-    preloadMatchItems(match);
-
-    const championImageKey = `champion-${match.championName}`;
-    const championImageUrl = staticData ? `${dataDragonBase}/${getChampionImageURL(match.championName, match.championId)}` : '';
-    
-    // Determine role icon
-    const role = match.teamPosition || 'NONE';
-    const roleIconUrl = getRoleIconURL(role);
-
-    // Summoner spell icons
-    const spellIcons = match.summonerSpells.map((spellId, index) => {
-      const spellImageKey = `spell-${spellId}`;
-      return (
-        <img
-          key={`spell-${index}-${spellId}`}
-          src={staticData ? `${dataDragonBase}/${getSummonerSpellImageURL(spellId)}` : ''}
-          alt={`Summoner Spell ${spellId}`}
-          className={`spell-icon stacked ${!isImageLoaded(spellImageKey) ? 'loading' : ''}`}
-          onLoad={() => setLoadedImages(prev => new Set(prev).add(spellImageKey))}
-          onError={(e) => (e.currentTarget.src = 'placeholder.png')}
-          style={{ display: 'block', marginBottom: index === 0 ? 2 : 0 }}
-        />
-      );
-    });
-
-    return (
-      <div key={match.matchId} className={`match-card ${match.win ? 'win' : 'loss'} ${!isImageLoaded(championImageKey) ? 'loading' : ''}`}>
-        <div className="match-header">
-          <div className="champion-icon-container-with-spells">
-            <div className="summoner-spells-vertical">
-              {spellIcons}
-            </div>
-            <div className="champion-icon-container">
-              <img
-                src={championImageUrl}
-                alt={match.championName}
-                className={`champion-icon ${!isImageLoaded(championImageKey) ? 'loading' : ''}`}
-                onLoad={() => setLoadedImages(prev => new Set(prev).add(championImageKey))}
-                onError={(e) => (e.currentTarget.src = 'placeholder.png')}
-              />
-              {roleIconUrl && (
-                <img src={roleIconUrl} alt={role} className="role-icon" />
-              )}
-            </div>
-          </div>
-          <div className="champion-details">
-            <span className="champion-name">{match.championName}</span>
-            <span className="game-mode">{match.gameMode.replace('_', ' ')} - {match.win ? "Victory" : "Defeat"}</span>
-            <span className="game-duration">{formatGameDuration(match.gameDuration)}</span>
-          </div>
-          <div className="kda">
-            <span>{match.kills} / {match.deaths} / {match.assists}</span>
-            <span>{match.kda.toFixed(2)} KDA</span>
-          </div>
-        </div>
-        <div className="match-body">
-          <div className="runes-spells">
-            {/* Summoner spells now shown next to champ icon, so skip here */}
-            <div className="runes">
-              {(() => {
-                const runeImageKey = `rune-${match.primaryRune}`;
-                return (
-                  <img
-                    src={staticData ? `${dataDragonBase}/${getRuneImageURL(match.primaryRune)}` : ''}
-                    alt={`Primary Rune ${match.primaryRune}`}
-                    className={`rune-icon ${!isImageLoaded(runeImageKey) ? 'loading' : ''}`}
-                    onLoad={() => setLoadedImages(prev => new Set(prev).add(runeImageKey))}
-                    onError={(e) => (e.currentTarget.src = 'placeholder.png')}
-                  />
-                );
-              })()}
-            </div>
-          </div>
-          <div className="items">
-            {match.items.slice(0, 6).map((itemId, index) => renderItemImage(itemId, index))}
-            {renderItemImage(match.items[6], 6, true)}
-          </div>
-          <div className="match-stats-grid">
-            <span>CS: {match.totalMinionsKilled}</span>
-            <span>Gold: {match.goldEarned.toLocaleString()}</span>
-            <span>Level: {match.champLevel}</span>
-            <span>Vision: {match.visionScore}</span>
-            <span>Dmg to Champs: {match.damageToChampions.toLocaleString()}</span>
-            <span>Dmg Taken: {match.totalDamageTaken.toLocaleString()}</span>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderStatBox = (label: string, value: string | number, subLabel?: string) => (
-    <div className="stat-box">
-      <span className="stat-value">{value}</span>
-      <span className="stat-label">{label}</span>
-      {subLabel && <span className="stat-sublabel">{subLabel}</span>}
-    </div>
-  );
-  
   // Helper: Get champion icon URL - now uses the improved getChampionImageURL function
   const getChampionIcon = (championName: string, championId?: number) => {
     const imageUrl = getChampionImageURL(championName, championId);
