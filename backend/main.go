@@ -2,10 +2,20 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"fmt"
 	"log"
+	"math/big"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -23,8 +33,10 @@ var app GlobalAppData
 
 func corsMiddleware(next http.Handler) http.Handler {
 	allowedOrigins := map[string]bool{
-		"http://localhost:3000":    true,
-		"https://dzeddy.github.io": true,
+		"http://localhost:3000":                     true,
+		"https://localhost:3000":                    true,
+		"https://dzeddy.github.io":                  true,
+		"https://league-dashboard-eosin.vercel.app": true,
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -45,6 +57,105 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// generateSelfSignedCert generates a self-signed certificate for development
+func generateSelfSignedCert(certFile, keyFile string) error {
+	// Generate a new private key
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return fmt.Errorf("failed to generate private key: %v", err)
+	}
+
+	// Create certificate template
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Organization:  []string{"League Dashboard"},
+			Country:       []string{"US"},
+			Province:      []string{""},
+			Locality:      []string{"San Francisco"},
+			StreetAddress: []string{""},
+			PostalCode:    []string{""},
+		},
+		NotBefore:   time.Now(),
+		NotAfter:    time.Now().Add(365 * 24 * time.Hour), // Valid for 1 year
+		KeyUsage:    x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
+		DNSNames:    []string{"localhost", "*.localhost"},
+	}
+
+	// Create the certificate
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		return fmt.Errorf("failed to create certificate: %v", err)
+	}
+
+	// Write certificate to file
+	certOut, err := os.Create(certFile)
+	if err != nil {
+		return fmt.Errorf("failed to open cert.pem for writing: %v", err)
+	}
+	defer certOut.Close()
+
+	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
+		return fmt.Errorf("failed to write certificate: %v", err)
+	}
+
+	// Write private key to file
+	keyOut, err := os.Create(keyFile)
+	if err != nil {
+		return fmt.Errorf("failed to open key.pem for writing: %v", err)
+	}
+	defer keyOut.Close()
+
+	privKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		return fmt.Errorf("failed to marshal private key: %v", err)
+	}
+
+	if err := pem.Encode(keyOut, &pem.Block{Type: "PRIVATE KEY", Bytes: privKeyBytes}); err != nil {
+		return fmt.Errorf("failed to write private key: %v", err)
+	}
+
+	log.Printf("Generated self-signed certificate: %s and %s", certFile, keyFile)
+	return nil
+}
+
+// ensureSSLCerts ensures SSL certificates exist, generating self-signed ones if needed
+func ensureSSLCerts() (string, string, error) {
+	certFile := os.Getenv("SSL_CERT_FILE")
+	keyFile := os.Getenv("SSL_KEY_FILE")
+
+	// Use default paths if not specified
+	if certFile == "" {
+		certFile = "server.crt"
+	}
+	if keyFile == "" {
+		keyFile = "server.key"
+	}
+
+	// Make paths absolute
+	certFile, _ = filepath.Abs(certFile)
+	keyFile, _ = filepath.Abs(keyFile)
+
+	// Check if both certificate files exist
+	if _, err := os.Stat(certFile); os.IsNotExist(err) {
+		log.Println("SSL certificate not found, generating self-signed certificate...")
+		if err := generateSelfSignedCert(certFile, keyFile); err != nil {
+			return "", "", err
+		}
+	} else if _, err := os.Stat(keyFile); os.IsNotExist(err) {
+		log.Println("SSL private key not found, generating self-signed certificate...")
+		if err := generateSelfSignedCert(certFile, keyFile); err != nil {
+			return "", "", err
+		}
+	} else {
+		log.Printf("Using existing SSL certificate: %s", certFile)
+	}
+
+	return certFile, keyFile, nil
 }
 
 // isAWSEnvironment detects if the application is running in an AWS environment
@@ -240,16 +351,63 @@ func main() {
 
 	apiRouter.HandleFunc("/popular-items", getPopularItemsHandler(&app)).Methods("GET", "OPTIONS")
 
-	log.Println("Backend server starting on :8080")
+	// Check if SSL should be enabled (default: true)
+	useSSL := os.Getenv("USE_SSL")
+	if useSSL == "" {
+		useSSL = "true" // Default to SSL enabled
+	}
+
+	// Get port configuration
+	port := os.Getenv("PORT")
+	if port == "" {
+		if useSSL == "true" {
+			port = "8443" // Default HTTPS port
+		} else {
+			port = "8080" // Default HTTP port
+		}
+	}
+
 	srv := &http.Server{
 		Handler:      handlers.CompressHandler(r),
-		Addr:         ":8080",
+		Addr:         ":" + port,
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 	}
 
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Could not listen on :8080: %v\n", err)
+	if useSSL == "true" {
+		// Set up SSL certificates
+		certFile, keyFile, err := ensureSSLCerts()
+		if err != nil {
+			log.Fatalf("Failed to set up SSL certificates: %v", err)
+		}
+
+		// Configure TLS
+		tlsConfig := &tls.Config{
+			MinVersion:               tls.VersionTLS12,
+			CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
+			PreferServerCipherSuites: true,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			},
+		}
+		srv.TLSConfig = tlsConfig
+
+		log.Printf("Starting HTTPS server on :%s", port)
+		log.Printf("Using SSL certificate: %s", certFile)
+
+		if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Could not start HTTPS server on :%s: %v\n", port, err)
+		}
+	} else {
+		log.Printf("Starting HTTP server on :%s", port)
+		log.Println("WARNING: SSL is disabled. This should only be used for development!")
+
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Could not start HTTP server on :%s: %v\n", port, err)
+		}
 	}
+
 	log.Println("Backend server stopped.")
 }

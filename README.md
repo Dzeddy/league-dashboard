@@ -97,7 +97,9 @@ Before running this application, make sure you have the following installed:
 
 5. **Access the application**
    - Frontend: http://localhost:3000
-   - Backend API: http://localhost:8080
+   - Backend API: https://localhost:8443 (HTTPS with auto-generated SSL certificates)
+   
+   **Note**: The backend now uses HTTPS by default. Your browser may show a security warning for the self-signed certificate - this is normal for development. Click "Advanced" and "Proceed to localhost" to continue.
 
 ## Usage
 
@@ -144,7 +146,8 @@ In the frontend directory:
 - `npm run eject` - Eject from Create React App (one-way operation)
 
 In the backend directory:
-- `go run .` - Start the Go server in development mode
+- `go run .` - Start the Go server in development mode (HTTPS by default)
+- `./run-ssl.sh` - Start the server with SSL enabled (recommended)
 - `go build` - Build the Go application
 - `go test ./...` - Run all tests
 
@@ -175,6 +178,13 @@ The application uses MongoDB with the following main collections:
 | `MONGO_URI` | MongoDB connection string | `mongodb://localhost:27017` |
 | `MONGO_DATABASE` | MongoDB database name | `leagueperformancetracker` |
 | `REDIS_ADDR` | Redis server address | `localhost:6379` |
+| `PORT` | Server port | `8443` (HTTPS) / `8080` (HTTP) |
+| `USE_SSL` | Enable HTTPS/SSL | `true` |
+| `SSL_CERT_FILE` | SSL certificate file path | `server.crt` (auto-generated) |
+| `SSL_KEY_FILE` | SSL private key file path | `server.key` (auto-generated) |
+
+**SSL Configuration:**
+The backend now supports HTTPS by default. SSL certificates are automatically generated for development. See `backend/SSL_SETUP.md` for detailed SSL configuration instructions.
 
 #### Frontend Configuration
 
@@ -182,14 +192,14 @@ The frontend requires environment variables prefixed with `REACT_APP_` to be acc
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `REACT_APP_API_BASE_URL` | Backend API base URL | `http://localhost:8080/api` |
+| `REACT_APP_API_BASE_URL` | Backend API base URL | `https://localhost:8443/api` |
 
 **Setting up frontend environment variables:**
 
 1. Create a `.env.local` file in the `frontend/` directory:
    ```bash
    cd frontend
-   echo "REACT_APP_API_BASE_URL=http://localhost:8080/api" > .env.local
+   echo "REACT_APP_API_BASE_URL=https://localhost:8443/api" > .env.local
    ```
 
 2. For production deployment, set the environment variable to your production API URL:
