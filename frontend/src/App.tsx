@@ -267,19 +267,19 @@ function App() {
   // Helper: Map teamPosition/lane to role icon URL
   const getRoleIconURL = (role: string) => {
     const roleMap: { [key: string]: string } = {
-      TOP: '/roles/64px-Top_icon.webp',
-      JUNGLE: '/roles/64px-Jungle_icon.webp',
-      MID: '/roles/64px-Middle_icon.webp',
-      MIDDLE: '/roles/64px-Middle_icon.webp',
-      BOT: '/roles/64px-Bottom_icon.webp',
-      BOTTOM: '/roles/64px-Bottom_icon.webp',
-      ADC: '/roles/64px-Bottom_icon.webp',
-      SUPPORT: '/roles/64px-Support_icon.webp',
-      UTILITY: '/roles/64px-Support_icon.webp',
+      TOP: `${process.env.PUBLIC_URL}/roles/64px-Top_icon.webp`,
+      JUNGLE: `${process.env.PUBLIC_URL}/roles/64px-Jungle_icon.webp`,
+      MID: `${process.env.PUBLIC_URL}/roles/64px-Middle_icon.webp`,
+      MIDDLE: `${process.env.PUBLIC_URL}/roles/64px-Middle_icon.webp`,
+      BOT: `${process.env.PUBLIC_URL}/roles/64px-Bottom_icon.webp`,
+      BOTTOM: `${process.env.PUBLIC_URL}/roles/64px-Bottom_icon.webp`,
+      ADC: `${process.env.PUBLIC_URL}/roles/64px-Bottom_icon.webp`,
+      SUPPORT: `${process.env.PUBLIC_URL}/roles/64px-Support_icon.webp`,
+      UTILITY: `${process.env.PUBLIC_URL}/roles/64px-Support_icon.webp`,
       // Special game modes
-      ARENA: '/roles/64px-Jungle_icon.webp',
-      CHERRY: '/roles/64px-Jungle_icon.webp',
-      ARAM: '/roles/64px-Middle_icon.webp',
+      ARENA: `${process.env.PUBLIC_URL}/roles/64px-Jungle_icon.webp`,
+      CHERRY: `${process.env.PUBLIC_URL}/roles/64px-Jungle_icon.webp`,
+      ARAM: `${process.env.PUBLIC_URL}/roles/64px-Middle_icon.webp`,
       NONE: '',
     };
     return roleMap[role?.toUpperCase()] || '';
