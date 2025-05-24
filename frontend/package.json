@@ -2,7 +2,7 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
-  "homepage": "https://dzeddy.github.io/league-dashboard",
+  "homepage": ".",
   "dependencies": {
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
@@ -23,13 +23,17 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "build:local": "npm run set-homepage:local && npm run build",
+    "build:github": "npm run set-homepage:github && npm run build",
+    "set-homepage:local": "npm pkg set homepage='.'",
+    "set-homepage:github": "npm pkg set homepage='https://dzeddy.github.io/league-dashboard'",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "deploy": "gh-pages -d build",
+    "deploy": "npm run build:github && gh-pages -d build",
     "serve": "serve -s build -l 3000",
-    "build-and-serve": "npm run build && npm run serve",
+    "build-and-serve": "npm run build:local && npm run serve",
     "deploy-serve": "node deploy-serve.js",
-    "predeploy": "npm run build"
+    "predeploy": "npm run build:github"
   },
   "eslintConfig": {
     "extends": [
