@@ -100,7 +100,9 @@ function App() {
         console.log("Static data loaded:", response.data);
       } catch (err) {
         console.error("Error fetching static data:", err);
-        setError("Could not load essential game data. Please try refreshing.");
+        // Don't set error for static data loading failure - let the UI show anyway
+        // The search form will show an appropriate message when user tries to search
+        console.log("Backend unavailable - frontend will run in limited mode");
       } finally {
         setIsStaticDataLoading(false);
       }
@@ -126,7 +128,7 @@ function App() {
       return;
     }
     if (!staticData) {
-      setError("Game data is still loading. Please wait a moment and try again.");
+      setError("Backend is currently unavailable. This is a demo showing the frontend interface. The backend server needs to be deployed to fetch live League of Legends data.");
       return;
     }
     
@@ -153,7 +155,7 @@ function App() {
       if (err.response && err.response.data) {
         setError(`Error: ${err.response.data.error || err.response.data}`);
       } else if (err.request) {
-        setError("Error: No response from server. Is the backend running?");
+        setError("Backend server is not responding. This frontend is deployed but the backend API needs to be running to fetch League of Legends data.");
       } else {
         setError(`Error: ${err.message}`);
       }
