@@ -585,7 +585,7 @@ button, select, input {
   border: 2px solid #463714;
   border-radius: 12px;
   padding: 30px;
-  min-width: 600px;
+  min-width: 1000px;
   max-width: 95vw;
   max-height: 90vh;
   overflow-y: auto;
