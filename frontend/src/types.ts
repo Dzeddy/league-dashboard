@@ -6,7 +6,7 @@ export interface AccountDTO {
 
 export interface MatchMetadataDto {
     matchId: string;
-    participants: string[]; // List of PUUIDs
+    participants: string[];
 }
 
 export interface ParticipantChallengesDto {
