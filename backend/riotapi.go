@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -248,6 +249,59 @@ func extractPlayerMatchStats(matchData *MatchDto, playerPUUID string, app *Globa
 	return stats, nil
 }
 
+// fetchMatchesConcurrently fetches match details concurrently with a semaphore to limit concurrent requests
+func fetchMatchesConcurrently(app *GlobalAppData, userRegion string, matchIDs []string, puuid string) []PlayerMatchStats {
+	var matches []PlayerMatchStats
+	matchChan := make(chan *PlayerMatchStats, len(matchIDs))
+	var wg sync.WaitGroup
+
+	// Use semaphore to limit concurrent requests
+	sem := make(chan struct{}, 10) // Limit to 10 concurrent requests
+
+	for _, matchID := range matchIDs {
+		wg.Add(1)
+		go func(mID string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			matchData, err := getMatchDetails(app, userRegion, mID)
+			if err != nil {
+				log.Printf("Error getting match details for %s: %v", mID, err)
+				return
+			}
+			if matchData == nil {
+				return
+			}
+
+			playerStats, err := extractPlayerMatchStats(matchData, puuid, app)
+			if err != nil {
+				log.Printf("Error extracting player stats for match %s: %v", mID, err)
+				return
+			}
+			if playerStats != nil {
+				matchChan <- playerStats
+			}
+		}(matchID)
+	}
+
+	go func() {
+		wg.Wait()
+		close(matchChan)
+	}()
+
+	for match := range matchChan {
+		matches = append(matches, *match)
+	}
+
+	// Sort matches by game creation time
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].GameCreation > matches[j].GameCreation
+	})
+
+	return matches
+}
+
 func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagLine string, count, queueID int) (*UserPerformance, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout*time.Duration(count+5))
 	defer cancel()
@@ -315,29 +369,7 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 	}
 
 	var matches []PlayerMatchStats
-	for _, matchID := range matchIDs {
-		matchData, err := getMatchDetails(app, userRegion, matchID)
-		if err != nil {
-			log.Printf("Error getting match details for %s: %v. Skipping this match.", matchID, err)
-			continue
-		}
-		if matchData == nil {
-			continue
-		}
-
-		playerStats, err := extractPlayerMatchStats(matchData, puuid, app)
-		if err != nil {
-			log.Printf("Error extracting player stats for match %s, PUUID %s: %v. Skipping this match.", matchID, puuid, err)
-			continue
-		}
-		if playerStats != nil {
-			matches = append(matches, *playerStats)
-		}
-	}
-
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].GameCreation > matches[j].GameCreation
-	})
+	matches = fetchMatchesConcurrently(app, userRegion, matchIDs, puuid)
 
 	performance := UserPerformance{
 		PUUID:     puuid,

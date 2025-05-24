@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -241,7 +242,7 @@ func main() {
 
 	log.Println("Backend server starting on :8080")
 	srv := &http.Server{
-		Handler:      r,
+		Handler:      handlers.CompressHandler(r),
 		Addr:         ":8080",
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
