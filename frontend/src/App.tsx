@@ -1094,7 +1094,7 @@ function App() {
           <div className="search-card">
             <div className="search-header">
               <h2>Player Lookup</h2>
-              <span className="sub-text">Search for any League of Legends player</span>
+              <span className="sub-text">Search for any League of Legends player (e.x. Derp518 #2877)</span>
             </div>
             
             <form onSubmit={handleSubmit} className="search-form">
