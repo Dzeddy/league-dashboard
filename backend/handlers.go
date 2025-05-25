@@ -250,12 +250,12 @@ func getPopularItemsHandler(app *GlobalAppData) http.HandlerFunc {
 			return
 		}
 
-		err = app.redisClient.Set(ctx, popularItemsCacheKey, newCachedItemsJSON, popularItemsCacheTTL).Err()
-		if err != nil {
-			log.Printf("Error setting popular items in Redis cache: %v", err)
-		} else {
-			log.Printf("Successfully cached %d popular items.", len(itemIDs))
-		}
+		// Move Redis caching off the critical path - run asynchronously
+		go func(cacheData []byte) {
+			cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = app.redisClient.Set(cacheCtx, popularItemsCacheKey, cacheData, popularItemsCacheTTL).Err()
+		}(newCachedItemsJSON)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(itemIDs)

@@ -29,6 +29,23 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
+// Optimized HTTP transport for Riot API requests with connection reuse and TLS optimization
+var riotTransport = &http.Transport{
+	// Keep a handful of connections to each Riot edge-node alive
+	MaxIdleConns:        100,
+	MaxIdleConnsPerHost: 100,
+	IdleConnTimeout:     90 * time.Second,
+	// TLS handshakes are expensive; enable session resumption & HTTP/2
+	TLSClientConfig:   &tls.Config{MinVersion: tls.VersionTLS12},
+	ForceAttemptHTTP2: true,
+}
+
+// Optimized HTTP client for Riot API requests
+var riotHTTP = &http.Client{
+	Transport: riotTransport,
+	Timeout:   10 * time.Second, // Using the same timeout as defaultTimeout
+}
+
 var app GlobalAppData
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -302,7 +319,8 @@ func main() {
 	log.Printf("Configuration summary - MongoDB: %s, Redis: %s, Database: %s",
 		mongoURI, redisAddr, app.mongoDatabase)
 
-	app.httpClient = &http.Client{Timeout: defaultTimeout}
+	// Use the optimized HTTP client with connection reuse and TLS optimization
+	app.httpClient = riotHTTP
 
 	app.redisClient = redis.NewClient(&redis.Options{
 		Addr:     redisAddr,

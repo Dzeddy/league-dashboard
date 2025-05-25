@@ -7,16 +7,17 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-redis/redis/v8"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -28,6 +29,7 @@ const (
 	defaultTimeout               = 10 * time.Second
 	defaultMatchCount            = 25
 	defaultQueueID               = 0
+	defaultConcurrencyLimit      = 20 // Tunable concurrency limit for match fetching
 	dataDragonBaseURL            = "https://ddragon.leagueoflegends.com"
 )
 
@@ -61,10 +63,13 @@ func getPUUID(app *GlobalAppData, region, gameName, tagLine string) (string, err
 			return "", fmt.Errorf("PUUID not found for %s#%s in region %s", gameName, tagLine, region)
 		}
 
-		err = app.redisClient.Set(context.Background(), cacheKey, acc.PUUID, puuidCacheDuration).Err()
-		if err != nil {
-			log.Printf("Warning: Failed to cache PUUID: %v", err)
-		}
+		// Move Redis caching off the critical path - run asynchronously
+		go func(key, value string) {
+			cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = app.redisClient.Set(cacheCtx, key, value, puuidCacheDuration).Err()
+		}(cacheKey, acc.PUUID)
+
 		return acc.PUUID, nil
 	} else if err != nil {
 		return "", fmt.Errorf("failed to get PUUID from cache: %w", err)
@@ -105,11 +110,15 @@ func getMatchIDs(app *GlobalAppData, region, puuid string, count int, queueID in
 			return nil, fmt.Errorf("failed to decode match IDs response: %w", err)
 		}
 
-		matchIDsJSON, _ := json.Marshal(matchIDs)
-		err = app.redisClient.Set(context.Background(), cacheKey, matchIDsJSON, matchListCacheDuration).Err()
-		if err != nil {
-			log.Printf("Warning: Failed to cache match IDs: %v", err)
-		}
+		// Move Redis caching off the critical path - run asynchronously
+		go func(key string, data []string) {
+			cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if dataJSON, err := json.Marshal(data); err == nil {
+				_ = app.redisClient.Set(cacheCtx, key, dataJSON, matchListCacheDuration).Err()
+			}
+		}(cacheKey, matchIDs)
+
 		return matchIDs, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to get match IDs from cache: %w", err)
@@ -157,10 +166,13 @@ func getMatchDetails(app *GlobalAppData, region, matchID string) (*MatchDto, err
 			return nil, fmt.Errorf("failed to decode match details response for %s: %w", matchID, err)
 		}
 
-		err = app.redisClient.Set(context.Background(), cacheKey, string(bodyBytes), matchDetailsCacheDuration).Err()
-		if err != nil {
-			log.Printf("Warning: Failed to cache match details for %s: %v", matchID, err)
-		}
+		// Move Redis caching off the critical path - run asynchronously
+		go func(key string, data []byte) {
+			cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = app.redisClient.Set(cacheCtx, key, string(data), matchDetailsCacheDuration).Err()
+		}(cacheKey, bodyBytes)
+
 		return &match, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to get match details for %s from cache: %w", matchID, err)
@@ -249,49 +261,48 @@ func extractPlayerMatchStats(matchData *MatchDto, playerPUUID string, app *Globa
 	return stats, nil
 }
 
-// fetchMatchesConcurrently fetches match details concurrently with a semaphore to limit concurrent requests
-func fetchMatchesConcurrently(app *GlobalAppData, userRegion string, matchIDs []string, puuid string) []PlayerMatchStats {
-	var matches []PlayerMatchStats
-	matchChan := make(chan *PlayerMatchStats, len(matchIDs))
-	var wg sync.WaitGroup
-
-	// Use semaphore to limit concurrent requests
-	sem := make(chan struct{}, 10) // Limit to 10 concurrent requests
-
-	for _, matchID := range matchIDs {
-		wg.Add(1)
-		go func(mID string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			matchData, err := getMatchDetails(app, userRegion, mID)
-			if err != nil {
-				log.Printf("Error getting match details for %s: %v", mID, err)
-				return
-			}
-			if matchData == nil {
-				return
-			}
-
-			playerStats, err := extractPlayerMatchStats(matchData, puuid, app)
-			if err != nil {
-				log.Printf("Error extracting player stats for match %s: %v", mID, err)
-				return
-			}
-			if playerStats != nil {
-				matchChan <- playerStats
-			}
-		}(matchID)
+// getConcurrencyLimit returns the concurrency limit for match fetching,
+// checking environment variable first, then falling back to default
+func getConcurrencyLimit() int {
+	if limitStr := os.Getenv("MATCH_FETCH_CONCURRENCY"); limitStr != "" {
+		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit <= 100 {
+			return limit
+		}
 	}
+	return defaultConcurrencyLimit
+}
 
-	go func() {
-		wg.Wait()
-		close(matchChan)
-	}()
+// fetchMatchesConcurrently fetches match details concurrently using errgroup with tunable concurrency
+func fetchMatchesConcurrently(app *GlobalAppData, region string, ids []string, puuid string) []PlayerMatchStats {
+	g, _ := errgroup.WithContext(context.Background())
+	g.SetLimit(getConcurrencyLimit()) // tune until you hit Riot's global rate-limit
 
-	for match := range matchChan {
-		matches = append(matches, *match)
+	results := make([]PlayerMatchStats, len(ids))
+	for i, id := range ids {
+		i, id := i, id // capture loop variables
+		g.Go(func() error {
+			match, err := getMatchDetails(app, region, id)
+			if err != nil || match == nil {
+				return err // auto-propagate error for cancellation
+			}
+			stats, err := extractPlayerMatchStats(match, puuid, app)
+			if err != nil {
+				return err
+			}
+			if stats != nil {
+				results[i] = *stats
+			}
+			return nil
+		})
+	}
+	_ = g.Wait() // ignore err: partial data is ok
+
+	// Filter out empty results (from failed fetches)
+	var matches []PlayerMatchStats
+	for _, result := range results {
+		if result.MatchID != "" { // Check if the result is valid
+			matches = append(matches, result)
+		}
 	}
 
 	// Sort matches by game creation time
@@ -335,10 +346,16 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 	err = collection.FindOne(ctx, bson.M{"_id": puuid, "region": userRegion}).Decode(&cachedPerformance)
 	if err == nil && len(cachedPerformance.Matches) >= count && time.Now().Unix()-cachedPerformance.UpdatedAt < int64(userPerformanceCacheDuration/time.Second)/2 {
 		log.Printf("User performance for %s loaded from MongoDB.", puuid)
-		perfJSON, _ := json.Marshal(cachedPerformance)
-		if err := app.redisClient.Set(ctx, redisCacheKey, perfJSON, userPerformanceCacheDuration).Err(); err != nil {
-			log.Printf("Warning: failed to update Redis cache for user performance %s: %v", puuid, err)
-		}
+
+		// Move Redis caching off the critical path - run asynchronously
+		go func(key string, data UserPerformance) {
+			cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if perfJSON, err := json.Marshal(data); err == nil {
+				_ = app.redisClient.Set(cacheCtx, key, perfJSON, userPerformanceCacheDuration).Err()
+			}
+		}(redisCacheKey, cachedPerformance)
+
 		if len(cachedPerformance.Matches) > count {
 			trimmed := *&cachedPerformance
 			trimmed.Matches = cachedPerformance.Matches[:count]
@@ -379,20 +396,22 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 		UpdatedAt: time.Now().Unix(),
 	}
 
-	opts := options.Update().SetUpsert(true)
-	_, err = collection.UpdateOne(ctx, bson.M{"_id": puuid, "region": userRegion}, bson.M{"$set": performance}, opts)
-	if err != nil {
-		log.Printf("Warning: Failed to store user performance for %s in MongoDB: %v", puuid, err)
-	}
+	// Move persistence off the critical path - run asynchronously
+	go func(data UserPerformance, redisKey string, collection *mongo.Collection) {
+		persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 
-	perfJSON, err := json.Marshal(performance)
-	if err != nil {
-		log.Printf("Warning: Failed to marshal performance data for Redis for %s: %v", puuid, err)
-	} else {
-		if err := app.redisClient.Set(ctx, redisCacheKey, perfJSON, userPerformanceCacheDuration).Err(); err != nil {
-			log.Printf("Warning: failed to update Redis cache for user performance %s: %v", puuid, err)
+		// Async MongoDB write
+		opts := options.Update().SetUpsert(true)
+		filter := bson.M{"_id": data.PUUID, "region": data.Region}
+		update := bson.M{"$set": data}
+		_, _ = collection.UpdateOne(persistCtx, filter, update, opts)
+
+		// Async Redis write
+		if dataJSON, err := json.Marshal(data); err == nil {
+			_ = app.redisClient.Set(persistCtx, redisKey, dataJSON, userPerformanceCacheDuration).Err()
 		}
-	}
+	}(performance, redisCacheKey, collection)
 
 	return &performance, nil
 }
@@ -446,10 +465,13 @@ func loadChampions(app *GlobalAppData, version string) (map[string]ChampionData,
 		return nil, fmt.Errorf("failed to decode champions for version %s: %w", version, err)
 	}
 
-	err = app.redisClient.Set(context.Background(), cacheKey, string(bodyBytes), staticDataCacheDuration).Err()
-	if err != nil {
-		log.Printf("Warning: Failed to cache champions for version %s: %v", version, err)
-	}
+	// Move Redis caching off the critical path - run asynchronously
+	go func(key string, data []byte) {
+		cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = app.redisClient.Set(cacheCtx, key, string(data), staticDataCacheDuration).Err()
+	}(cacheKey, bodyBytes)
+
 	log.Printf("Champions loaded from API for version %s", version)
 	return champions.Data, nil
 }
@@ -481,10 +503,14 @@ func loadItems(app *GlobalAppData, version string) (map[string]ItemData, error) 
 	if err := json.Unmarshal(bodyBytes, &items); err != nil {
 		return nil, fmt.Errorf("failed to decode items for version %s: %w", version, err)
 	}
-	err = app.redisClient.Set(context.Background(), cacheKey, string(bodyBytes), staticDataCacheDuration).Err()
-	if err != nil {
-		log.Printf("Warning: Failed to cache items for version %s: %v", version, err)
-	}
+
+	// Move Redis caching off the critical path - run asynchronously
+	go func(key string, data []byte) {
+		cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = app.redisClient.Set(cacheCtx, key, string(data), staticDataCacheDuration).Err()
+	}(cacheKey, bodyBytes)
+
 	log.Printf("Items loaded from API for version %s", version)
 	return items.Data, nil
 }
@@ -516,10 +542,14 @@ func loadSummonerSpells(app *GlobalAppData, version string) (map[string]Summoner
 	if err := json.Unmarshal(bodyBytes, &spells); err != nil {
 		return nil, fmt.Errorf("failed to decode summoner spells for version %s: %w", version, err)
 	}
-	err = app.redisClient.Set(context.Background(), cacheKey, string(bodyBytes), staticDataCacheDuration).Err()
-	if err != nil {
-		log.Printf("Warning: Failed to cache summoner spells for version %s: %v", version, err)
-	}
+
+	// Move Redis caching off the critical path - run asynchronously
+	go func(key string, data []byte) {
+		cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = app.redisClient.Set(cacheCtx, key, string(data), staticDataCacheDuration).Err()
+	}(cacheKey, bodyBytes)
+
 	log.Printf("Summoner spells loaded from API for version %s", version)
 	return spells.Data, nil
 }
@@ -553,10 +583,13 @@ func loadRunes(app *GlobalAppData, version string) (map[int]RuneInfo, error) {
 		return nil, fmt.Errorf("failed to decode runes for version %s: %w", version, err)
 	}
 
-	err = app.redisClient.Set(context.Background(), cacheKey, string(bodyBytes), staticDataCacheDuration).Err()
-	if err != nil {
-		log.Printf("Warning: Failed to cache runes for version %s: %v", version, err)
-	}
+	// Move Redis caching off the critical path - run asynchronously
+	go func(key string, data []byte) {
+		cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = app.redisClient.Set(cacheCtx, key, string(data), staticDataCacheDuration).Err()
+	}(cacheKey, bodyBytes)
+
 	log.Printf("Runes loaded from API for version %s", version)
 	return flattenRuneData(runePaths), nil
 }
