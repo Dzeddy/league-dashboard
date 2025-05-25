@@ -1518,6 +1518,21 @@ button, select, input {
   transform: translateY(-2px);
 }
 
+/* Champion Table Sorting Styles */
+.champion-table-header .sortable {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+
+/* Enhanced responsive design for sorting */
+@media (max-width: 800px) {
+  .champion-table-header .sortable {
+    font-size: 0.9rem;
+    padding: 10px 5px;
+  }
+}
+
 /* Responsive design for champion table */
 @media (max-width: 1200px) {
   .champion-table-header,

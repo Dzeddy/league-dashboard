@@ -9,6 +9,10 @@ dayjs.extend(relativeTime);
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8080/api';
 
+// Type definitions for sorting functionality
+type SortColumn = 'champion' | 'games' | 'winrate' | 'kda' | 'cs' | 'damage' | 'lastPlayed';
+type SortDirection = 'asc' | 'desc';
+
 // interface AggregatedStats {
 //   winRate: number;
 //   wins: number;
@@ -41,6 +45,10 @@ function App() {
 
   const [fullMatchData, setFullMatchData] = useState<any | null>(null);
   const [isMatchLoading, setIsMatchLoading] = useState(false);
+
+  // Sorting state for champion performance table
+  const [sortColumn, setSortColumn] = useState<SortColumn>('games');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   // Derived stats (these are calculated but will be used later for filtering/display)
   // const [lifetimeStats, setLifetimeStats] = useState<AggregatedStats | null>(null);
@@ -980,30 +988,116 @@ function App() {
     );
   };
 
+  // Sort handler for champion performance table
+  const handleSort = (column: SortColumn) => {
+    if (sortColumn === column) {
+      // If clicking the same column, toggle direction
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      // If clicking a different column, set new column and default to descending
+      setSortColumn(column);
+      setSortDirection('desc');
+    }
+  };
+
   const renderChampionStats = () => {
     if (!recentGamesSummary) return null;
 
     const { championStats } = recentGamesSummary;
-    const champions = Object.keys(championStats)
-      .sort((a, b) => championStats[b].gamesPlayed - championStats[a].gamesPlayed)
-      .slice(0, 10); // Show top 10 most played
+    const dataDragonBase = "https://ddragon.leagueoflegends.com/cdn";
+    
+    // Get all champions and apply sorting
+    const champions = Object.keys(championStats).sort((a, b) => {
+      const statsA = championStats[a];
+      const statsB = championStats[b];
+      
+      let comparison = 0;
+      
+      switch (sortColumn) {
+        case 'champion':
+          comparison = a.localeCompare(b);
+          break;
+        case 'games':
+          comparison = statsA.gamesPlayed - statsB.gamesPlayed;
+          break;
+        case 'winrate':
+          comparison = statsA.winRate - statsB.winRate;
+          break;
+        case 'kda':
+          comparison = statsA.championKDA - statsB.championKDA;
+          break;
+        case 'cs':
+          comparison = statsA.avgCSPerMin - statsB.avgCSPerMin;
+          break;
+        case 'damage':
+          comparison = statsA.avgDamageToChampions - statsB.avgDamageToChampions;
+          break;
+        case 'lastPlayed':
+          comparison = statsA.lastPlayed - statsB.lastPlayed;
+          break;
+        default:
+          comparison = statsB.gamesPlayed - statsA.gamesPlayed; // Default sort by games
+      }
+      
+      return sortDirection === 'asc' ? comparison : -comparison;
+    }).slice(0, 10); // Show top 10
+
+    const getSortIcon = (column: SortColumn) => {
+      if (sortColumn !== column) return '';
+      return sortDirection === 'asc' ? ' ↑' : ' ↓';
+    };
 
     return (
       <div className="champion-stats">
         <div className="stats-header">
           <h2>Champion Performance</h2>
-          <span className="sub-text">Most played champions and their statistics</span>
+          <span className="sub-text">Click column headers to sort • Showing top 10 champions</span>
         </div>
 
         <div className="champion-table">
           <div className="champion-table-header">
-            <div className="champ-col">Champion</div>
-            <div className="games-col">Games</div>
-            <div className="winrate-col">Win Rate</div>
-            <div className="kda-col">KDA</div>
-            <div className="cs-col">CS/min</div>
-            <div className="damage-col">Damage</div>
-            <div className="last-played-col">Last Played</div>
+            <div 
+              className={`champ-col sortable ${sortColumn === 'champion' ? 'active' : ''}`}
+              onClick={() => handleSort('champion')}
+            >
+              Champion{getSortIcon('champion')}
+            </div>
+            <div 
+              className={`games-col sortable ${sortColumn === 'games' ? 'active' : ''}`}
+              onClick={() => handleSort('games')}
+            >
+              Games{getSortIcon('games')}
+            </div>
+            <div 
+              className={`winrate-col sortable ${sortColumn === 'winrate' ? 'active' : ''}`}
+              onClick={() => handleSort('winrate')}
+            >
+              Win Rate{getSortIcon('winrate')}
+            </div>
+            <div 
+              className={`kda-col sortable ${sortColumn === 'kda' ? 'active' : ''}`}
+              onClick={() => handleSort('kda')}
+            >
+              KDA{getSortIcon('kda')}
+            </div>
+            <div 
+              className={`cs-col sortable ${sortColumn === 'cs' ? 'active' : ''}`}
+              onClick={() => handleSort('cs')}
+            >
+              CS/min{getSortIcon('cs')}
+            </div>
+            <div 
+              className={`damage-col sortable ${sortColumn === 'damage' ? 'active' : ''}`}
+              onClick={() => handleSort('damage')}
+            >
+              Damage{getSortIcon('damage')}
+            </div>
+            <div 
+              className={`last-played-col sortable ${sortColumn === 'lastPlayed' ? 'active' : ''}`}
+              onClick={() => handleSort('lastPlayed')}
+            >
+              Last Played{getSortIcon('lastPlayed')}
+            </div>
           </div>
 
           {champions.map(championName => {
