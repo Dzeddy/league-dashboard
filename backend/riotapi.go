@@ -639,7 +639,11 @@ func getAPIRegion(region string) string {
 	}
 }
 
-// calculateRecentGamesSummary analyzes matches and creates comprehensive statistics
+// Add this helper function to check if a game mode is classic
+func isClassicMode(gameMode string) bool {
+	return strings.ToUpper(gameMode) == "CLASSIC"
+}
+
 func calculateRecentGamesSummary(matches []PlayerMatchStats, puuid, region, riotID string) *RecentGamesSummary {
 	if len(matches) == 0 {
 		return &RecentGamesSummary{
@@ -684,8 +688,12 @@ func calculateOverallStats(matches []PlayerMatchStats) OverallStats {
 	}
 
 	var wins, totalKills, totalDeaths, totalAssists int
-	var totalGameTime, totalVisionScore, totalCS, totalGold, totalDamage int64
+	var totalGameTime, totalVisionScore, totalDamage int64
 	var totalKillParticipation float64
+
+	// Separate tracking for classic mode stats
+	var classicGameTime, classicCS, classicGold int64
+	var classicGameCount int
 
 	for _, match := range matches {
 		if match.Win {
@@ -696,10 +704,16 @@ func calculateOverallStats(matches []PlayerMatchStats) OverallStats {
 		totalAssists += match.Assists
 		totalGameTime += match.GameDuration
 		totalVisionScore += int64(match.VisionScore)
-		totalCS += int64(match.TotalMinionsKilled)
-		totalGold += int64(match.GoldEarned)
 		totalDamage += int64(match.DamageToChampions)
 		totalKillParticipation += match.KillParticipation
+
+		// Only count CS and Gold for classic mode
+		if isClassicMode(match.GameMode) {
+			classicGameTime += match.GameDuration
+			classicCS += int64(match.TotalMinionsKilled)
+			classicGold += int64(match.GoldEarned)
+			classicGameCount++
+		}
 	}
 
 	losses := len(matches) - wins
@@ -711,6 +725,13 @@ func calculateOverallStats(matches []PlayerMatchStats) OverallStats {
 		overallKDA = float64(totalKills+totalAssists) / float64(totalDeaths)
 	} else {
 		overallKDA = float64(totalKills + totalAssists)
+	}
+
+	// Calculate CS/min and Gold/min only for classic games
+	var avgCSPerMin, avgGoldPerMin float64
+	if classicGameTime > 0 {
+		avgCSPerMin = (float64(classicCS) / float64(classicGameTime)) * 60
+		avgGoldPerMin = (float64(classicGold) / float64(classicGameTime)) * 60
 	}
 
 	return OverallStats{
@@ -727,8 +748,8 @@ func calculateOverallStats(matches []PlayerMatchStats) OverallStats {
 		AvgGameDuration:      float64(totalGameTime) / float64(len(matches)),
 		TotalGameTime:        totalGameTime,
 		AvgVisionScore:       float64(totalVisionScore) / float64(len(matches)),
-		AvgCSPerMin:          (float64(totalCS) / float64(totalGameTime)) * 60,
-		AvgGoldPerMin:        (float64(totalGold) / float64(totalGameTime)) * 60,
+		AvgCSPerMin:          avgCSPerMin,
+		AvgGoldPerMin:        avgGoldPerMin,
 		AvgDamageToChampions: float64(totalDamage) / float64(len(matches)),
 		AvgKillParticipation: totalKillParticipation / float64(len(matches)),
 	}
@@ -751,9 +772,13 @@ func calculateRoleStats(matches []PlayerMatchStats) map[string]RoleStats {
 		}
 
 		var wins, totalKills, totalDeaths, totalAssists int
-		var totalVisionScore, totalCS, totalGold, totalDamage int64
+		var totalVisionScore, totalDamage int64
 		var totalKillParticipation float64
 		var totalGameTime int64
+
+		// Separate tracking for classic mode stats
+		var classicGameTime, classicCS, classicGold int64
+		var classicGameCount int
 
 		for _, match := range roleMatches {
 			if match.Win {
@@ -763,11 +788,17 @@ func calculateRoleStats(matches []PlayerMatchStats) map[string]RoleStats {
 			totalDeaths += match.Deaths
 			totalAssists += match.Assists
 			totalVisionScore += int64(match.VisionScore)
-			totalCS += int64(match.TotalMinionsKilled)
-			totalGold += int64(match.GoldEarned)
 			totalDamage += int64(match.DamageToChampions)
 			totalKillParticipation += match.KillParticipation
 			totalGameTime += match.GameDuration
+
+			// Only count CS and Gold for classic mode
+			if isClassicMode(match.GameMode) {
+				classicGameTime += match.GameDuration
+				classicCS += int64(match.TotalMinionsKilled)
+				classicGold += int64(match.GoldEarned)
+				classicGameCount++
+			}
 		}
 
 		losses := len(roleMatches) - wins
@@ -778,6 +809,13 @@ func calculateRoleStats(matches []PlayerMatchStats) map[string]RoleStats {
 			roleKDA = float64(totalKills+totalAssists) / float64(totalDeaths)
 		} else {
 			roleKDA = float64(totalKills + totalAssists)
+		}
+
+		// Calculate CS/min and Gold/min only for classic games
+		var avgCSPerMin, avgGoldPerMin float64
+		if classicGameTime > 0 {
+			avgCSPerMin = (float64(classicCS) / float64(classicGameTime)) * 60
+			avgGoldPerMin = (float64(classicGold) / float64(classicGameTime)) * 60
 		}
 
 		roleStats[role] = RoleStats{
@@ -794,8 +832,8 @@ func calculateRoleStats(matches []PlayerMatchStats) map[string]RoleStats {
 			AvgAssists:           float64(totalAssists) / float64(len(roleMatches)),
 			RoleKDA:              roleKDA,
 			AvgVisionScore:       float64(totalVisionScore) / float64(len(roleMatches)),
-			AvgCSPerMin:          (float64(totalCS) / float64(totalGameTime)) * 60,
-			AvgGoldPerMin:        (float64(totalGold) / float64(totalGameTime)) * 60,
+			AvgCSPerMin:          avgCSPerMin,
+			AvgGoldPerMin:        avgGoldPerMin,
 			AvgDamageToChampions: float64(totalDamage) / float64(len(roleMatches)),
 			AvgKillParticipation: totalKillParticipation / float64(len(roleMatches)),
 		}
@@ -820,12 +858,16 @@ func calculateChampionStats(matches []PlayerMatchStats) map[string]ChampionStats
 		}
 
 		var wins, totalKills, totalDeaths, totalAssists int
-		var totalVisionScore, totalCS, totalGold, totalDamage int64
+		var totalVisionScore, totalDamage int64
 		var totalKillParticipation float64
 		var totalGameTime int64
 		var bestKDA, worstKDA float64
 		var lastPlayed int64
 		var championID int
+
+		// Separate tracking for classic mode stats
+		var classicGameTime, classicCS, classicGold int64
+		var classicGameCount int
 
 		bestKDA = -1      // Initialize to impossible value
 		worstKDA = 999999 // Initialize to very high value
@@ -847,11 +889,17 @@ func calculateChampionStats(matches []PlayerMatchStats) map[string]ChampionStats
 			totalDeaths += match.Deaths
 			totalAssists += match.Assists
 			totalVisionScore += int64(match.VisionScore)
-			totalCS += int64(match.TotalMinionsKilled)
-			totalGold += int64(match.GoldEarned)
 			totalDamage += int64(match.DamageToChampions)
 			totalKillParticipation += match.KillParticipation
 			totalGameTime += match.GameDuration
+
+			// Only count CS and Gold for classic mode
+			if isClassicMode(match.GameMode) {
+				classicGameTime += match.GameDuration
+				classicCS += int64(match.TotalMinionsKilled)
+				classicGold += int64(match.GoldEarned)
+				classicGameCount++
+			}
 
 			// Track best and worst KDA
 			if match.KDA > bestKDA {
@@ -872,6 +920,13 @@ func calculateChampionStats(matches []PlayerMatchStats) map[string]ChampionStats
 			championKDA = float64(totalKills + totalAssists)
 		}
 
+		// Calculate CS/min and Gold/min only for classic games
+		var avgCSPerMin, avgGoldPerMin float64
+		if classicGameTime > 0 {
+			avgCSPerMin = (float64(classicCS) / float64(classicGameTime)) * 60
+			avgGoldPerMin = (float64(classicGold) / float64(classicGameTime)) * 60
+		}
+
 		championStats[championName] = ChampionStats{
 			ChampionName:         championName,
 			ChampionID:           championID,
@@ -889,8 +944,8 @@ func calculateChampionStats(matches []PlayerMatchStats) map[string]ChampionStats
 			BestKDA:              bestKDA,
 			WorstKDA:             worstKDA,
 			AvgVisionScore:       float64(totalVisionScore) / float64(len(championMatches)),
-			AvgCSPerMin:          (float64(totalCS) / float64(totalGameTime)) * 60,
-			AvgGoldPerMin:        (float64(totalGold) / float64(totalGameTime)) * 60,
+			AvgCSPerMin:          avgCSPerMin,
+			AvgGoldPerMin:        avgGoldPerMin,
 			AvgDamageToChampions: float64(totalDamage) / float64(len(championMatches)),
 			AvgKillParticipation: totalKillParticipation / float64(len(championMatches)),
 			LastPlayed:           lastPlayed,
