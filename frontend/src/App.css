@@ -1611,3 +1611,49 @@ button, select, input {
     text-align: center;
   }
 }
+
+/* Loading more section for infinite scroll */
+.loading-more-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  gap: 15px;
+  color: #a09b8c;
+}
+
+.loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #3c4043;
+  border-top: 2px solid #c89b3c;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Smooth scroll behavior for match history */
+.match-history {
+  scroll-behavior: smooth;
+}
+
+/* Skeleton loader for smoother experience (optional) */
+.match-skeleton {
+  background: #1e2328;
+  border: 2px solid #3c4043;
+  border-radius: 8px;
+  height: 120px;
+  margin-bottom: 15px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-pulse {
+  0% { opacity: 0.6; }
+  50% { opacity: 1; }
+  100% { opacity: 0.6; }
+}

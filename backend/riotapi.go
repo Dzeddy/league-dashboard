@@ -101,13 +101,13 @@ func getPUUID(app *GlobalAppData, region, gameName, tagLine string) (string, err
 	return val, nil
 }
 
-func getMatchIDs(app *GlobalAppData, region, puuid string, count int, queueID int, startTime int64) ([]string, error) {
+func getMatchIDs(app *GlobalAppData, region, puuid string, count int, queueID int, startTime int64, offset int) ([]string, error) {
 	apiRegion := getAPIRegion(region)
-	cacheKey := fmt.Sprintf("matchids:%s:%s:%d:q%d:%d", apiRegion, puuid, count, queueID, startTime)
+	cacheKey := fmt.Sprintf("matchids:%s:%s:%d:q%d:%d:o%d", apiRegion, puuid, count, queueID, startTime, offset)
 
 	val, err := app.redisClient.Get(context.Background(), cacheKey).Result()
 	if err == redis.Nil {
-		url := fmt.Sprintf("https://%s.api.riotgames.com/lol/match/v5/matches/by-puuid/%s/ids?count=%d", apiRegion, puuid, count)
+		url := fmt.Sprintf("https://%s.api.riotgames.com/lol/match/v5/matches/by-puuid/%s/ids?count=%d&start=%d", apiRegion, puuid, count, offset)
 		if queueID != 0 {
 			url += fmt.Sprintf("&queue=%d", queueID)
 		}
@@ -357,7 +357,7 @@ func fetchMatchesConcurrently(app *GlobalAppData, region string, ids []string, p
 	return matches
 }
 
-func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagLine string, count, queueID int) (*UserPerformance, error) {
+func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagLine string, count, queueID, offset int) (*UserPerformance, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout*time.Duration(count+5))
 	defer cancel()
 
@@ -387,11 +387,11 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 	collection := app.mongoClient.Database(app.mongoDatabase).Collection("userperformances")
 	var cachedPerformance UserPerformance
 	cacheKeyDB := fmt.Sprintf("%s_%s", userRegion, puuid)
-	redisCacheKey := fmt.Sprintf("userperformance:%s", cacheKeyDB)
+	redisCacheKey := fmt.Sprintf("userperformance:%s:o%d", cacheKeyDB, offset)
 	val, err := app.redisClient.Get(ctx, redisCacheKey).Result()
 	if err == nil {
 		if err := json.Unmarshal([]byte(val), &cachedPerformance); err == nil {
-			log.Printf("User performance for %s loaded from Redis cache.", puuid)
+			log.Printf("User performance for %s loaded from Redis cache with offset %d.", puuid, offset)
 			if len(cachedPerformance.Matches) >= count {
 				if len(cachedPerformance.Matches) > count {
 					trimmed := *&cachedPerformance
@@ -405,42 +405,45 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 		log.Printf("Error unmarshalling user performance from Redis, will fetch: %v", err)
 	}
 
-	err = collection.FindOne(ctx, bson.M{"_id": puuid, "region": userRegion}).Decode(&cachedPerformance)
-	if err == nil && len(cachedPerformance.Matches) >= count && time.Now().Unix()-cachedPerformance.UpdatedAt < int64(userPerformanceCacheDuration/time.Second)/2 {
-		log.Printf("User performance for %s loaded from MongoDB.", puuid)
+	// For offset > 0, we need fresh data from API since MongoDB cache doesn't support pagination
+	if offset == 0 {
+		err = collection.FindOne(ctx, bson.M{"_id": puuid, "region": userRegion}).Decode(&cachedPerformance)
+		if err == nil && len(cachedPerformance.Matches) >= count && time.Now().Unix()-cachedPerformance.UpdatedAt < int64(userPerformanceCacheDuration/time.Second)/2 {
+			log.Printf("User performance for %s loaded from MongoDB.", puuid)
 
-		// Move Redis caching off the critical path - run asynchronously
-		go func(key string, data UserPerformance) {
-			cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if perfJSON, err := json.Marshal(data); err == nil {
-				_ = app.redisClient.Set(cacheCtx, key, perfJSON, userPerformanceCacheDuration).Err()
+			// Move Redis caching off the critical path - run asynchronously
+			go func(key string, data UserPerformance) {
+				cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if perfJSON, err := json.Marshal(data); err == nil {
+					_ = app.redisClient.Set(cacheCtx, key, perfJSON, userPerformanceCacheDuration).Err()
+				}
+			}(redisCacheKey, cachedPerformance)
+
+			if len(cachedPerformance.Matches) > count {
+				trimmed := *&cachedPerformance
+				trimmed.Matches = cachedPerformance.Matches[:count]
+				return &trimmed, nil
 			}
-		}(redisCacheKey, cachedPerformance)
-
-		if len(cachedPerformance.Matches) > count {
-			trimmed := *&cachedPerformance
-			trimmed.Matches = cachedPerformance.Matches[:count]
-			return &trimmed, nil
+			return &cachedPerformance, nil
 		}
-		return &cachedPerformance, nil
-	}
-	if err != nil && err != mongo.ErrNoDocuments {
-		log.Printf("Error fetching user performance from MongoDB for %s: %v. Will fetch from API.", puuid, err)
+		if err != nil && err != mongo.ErrNoDocuments {
+			log.Printf("Error fetching user performance from MongoDB for %s: %v. Will fetch from API.", puuid, err)
+		}
 	}
 
-	log.Printf("Fetching fresh match data for %s#%s (%s)", gameName, tagLine, puuid)
+	log.Printf("Fetching fresh match data for %s#%s (%s) with offset %d", gameName, tagLine, puuid, offset)
 
 	var seasonStartTime int64 = 0
 
-	matchIDs, err := getMatchIDs(app, userRegion, puuid, count, queueID, seasonStartTime)
+	matchIDs, err := getMatchIDs(app, userRegion, puuid, count, queueID, seasonStartTime, offset)
 	if err != nil {
 		return nil, fmt.Errorf("error getting match IDs: %w", err)
 	}
 
 	if len(matchIDs) == 0 {
-		log.Printf("No match IDs found for %s in region %s with queue %d", puuid, userRegion, queueID)
-		if cachedPerformance.PUUID != "" {
+		log.Printf("No match IDs found for %s in region %s with queue %d and offset %d", puuid, userRegion, queueID, offset)
+		if offset == 0 && cachedPerformance.PUUID != "" {
 			cachedPerformance.UpdatedAt = time.Now().Unix()
 			return &cachedPerformance, nil
 		}
@@ -458,32 +461,44 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 		UpdatedAt: time.Now().Unix(),
 	}
 
-	// Move persistence off the critical path - run asynchronously
-	go func(data UserPerformance, redisKey string, collection *mongo.Collection) {
-		persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	// Only cache in MongoDB for offset 0 (first page)
+	if offset == 0 {
+		// Move persistence off the critical path - run asynchronously
+		go func(data UserPerformance, redisKey string, collection *mongo.Collection) {
+			persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 
-		// Validate data before MongoDB write to prevent injection
-		if err := ValidatePUUID(data.PUUID); err != nil {
-			log.Printf("Invalid PUUID in async write, skipping: %v", err)
-			return
-		}
-		if err := ValidateRegion(data.Region); err != nil {
-			log.Printf("Invalid region in async write, skipping: %v", err)
-			return
-		}
+			// Validate data before MongoDB write to prevent injection
+			if err := ValidatePUUID(data.PUUID); err != nil {
+				log.Printf("Invalid PUUID in async write, skipping: %v", err)
+				return
+			}
+			if err := ValidateRegion(data.Region); err != nil {
+				log.Printf("Invalid region in async write, skipping: %v", err)
+				return
+			}
 
-		// Async MongoDB write
-		opts := options.Update().SetUpsert(true)
-		filter := bson.M{"_id": data.PUUID, "region": data.Region}
-		update := bson.M{"$set": data}
-		_, _ = collection.UpdateOne(persistCtx, filter, update, opts)
+			// Async MongoDB write
+			opts := options.Update().SetUpsert(true)
+			filter := bson.M{"_id": data.PUUID, "region": data.Region}
+			update := bson.M{"$set": data}
+			_, _ = collection.UpdateOne(persistCtx, filter, update, opts)
 
-		// Async Redis write
-		if dataJSON, err := json.Marshal(data); err == nil {
-			_ = app.redisClient.Set(persistCtx, redisKey, dataJSON, userPerformanceCacheDuration).Err()
-		}
-	}(performance, redisCacheKey, collection)
+			// Async Redis write
+			if dataJSON, err := json.Marshal(data); err == nil {
+				_ = app.redisClient.Set(persistCtx, redisKey, dataJSON, userPerformanceCacheDuration).Err()
+			}
+		}(performance, redisCacheKey, collection)
+	} else {
+		// For paginated requests, only cache in Redis with shorter TTL
+		go func(data UserPerformance, redisKey string) {
+			persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if dataJSON, err := json.Marshal(data); err == nil {
+				_ = app.redisClient.Set(persistCtx, redisKey, dataJSON, 10*time.Minute).Err()
+			}
+		}(performance, redisCacheKey)
+	}
 
 	return &performance, nil
 }
@@ -1118,7 +1133,7 @@ func normalizeRole(teamPosition string, gameMode string) string {
 // fetchRecentGamesSummary gets comprehensive match summary with caching
 func fetchRecentGamesSummary(app *GlobalAppData, userRegion, gameName, tagLine string, count, queueID int) (*RecentGamesSummary, error) {
 	// First fetch the regular user performance data
-	userPerformance, err := fetchAndStoreUserPerformance(app, userRegion, gameName, tagLine, count, queueID)
+	userPerformance, err := fetchAndStoreUserPerformance(app, userRegion, gameName, tagLine, count, queueID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch user performance: %w", err)
 	}
@@ -1127,4 +1142,109 @@ func fetchRecentGamesSummary(app *GlobalAppData, userRegion, gameName, tagLine s
 	summary := calculateRecentGamesSummary(userPerformance.Matches, userPerformance.PUUID, userPerformance.Region, userPerformance.RiotID)
 
 	return summary, nil
+}
+
+// calculateIncrementalStats computes stats for a subset of matches for pagination
+func calculateIncrementalStats(matches []PlayerMatchStats) *IncrementalStats {
+	if len(matches) == 0 {
+		return &IncrementalStats{
+			MatchCount:        0,
+			RoleBreakdown:     make(map[string]*IncrementalRoleStats),
+			ChampionBreakdown: make(map[string]*IncrementalChampionStats),
+		}
+	}
+
+	stats := &IncrementalStats{
+		MatchCount:        len(matches),
+		RoleBreakdown:     make(map[string]*IncrementalRoleStats),
+		ChampionBreakdown: make(map[string]*IncrementalChampionStats),
+	}
+
+	for _, match := range matches {
+		// Overall stats
+		if match.Win {
+			stats.Wins++
+		}
+		stats.TotalKills += match.Kills
+		stats.TotalDeaths += match.Deaths
+		stats.TotalAssists += match.Assists
+		stats.TotalGameTime += match.GameDuration
+		stats.TotalVisionScore += int64(match.VisionScore)
+		stats.TotalDamage += int64(match.DamageToChampions)
+		stats.TotalKillParticipation += match.KillParticipation
+
+		// Classic mode stats
+		if isClassicMode(match.GameMode) {
+			stats.ClassicGameTime += match.GameDuration
+			stats.ClassicCS += int64(match.TotalMinionsKilled)
+			stats.ClassicGold += int64(match.GoldEarned)
+			stats.ClassicGameCount++
+		}
+
+		// Role breakdown
+		role := normalizeRole(match.TeamPosition, match.GameMode)
+		if _, exists := stats.RoleBreakdown[role]; !exists {
+			stats.RoleBreakdown[role] = &IncrementalRoleStats{}
+		}
+		roleStats := stats.RoleBreakdown[role]
+		roleStats.GamesPlayed++
+		if match.Win {
+			roleStats.Wins++
+		}
+		roleStats.TotalKills += match.Kills
+		roleStats.TotalDeaths += match.Deaths
+		roleStats.TotalAssists += match.Assists
+		roleStats.TotalVisionScore += int64(match.VisionScore)
+		roleStats.TotalDamage += int64(match.DamageToChampions)
+		roleStats.TotalKillParticipation += match.KillParticipation
+		roleStats.TotalGameTime += match.GameDuration
+
+		if isClassicMode(match.GameMode) {
+			roleStats.ClassicGameTime += match.GameDuration
+			roleStats.ClassicCS += int64(match.TotalMinionsKilled)
+			roleStats.ClassicGold += int64(match.GoldEarned)
+			roleStats.ClassicGameCount++
+		}
+
+		// Champion breakdown
+		if _, exists := stats.ChampionBreakdown[match.ChampionName]; !exists {
+			stats.ChampionBreakdown[match.ChampionName] = &IncrementalChampionStats{
+				ChampionID: match.ChampionID,
+				BestKDA:    -1,
+				WorstKDA:   999999,
+			}
+		}
+		champStats := stats.ChampionBreakdown[match.ChampionName]
+		champStats.GamesPlayed++
+		if match.Win {
+			champStats.Wins++
+		}
+		champStats.TotalKills += match.Kills
+		champStats.TotalDeaths += match.Deaths
+		champStats.TotalAssists += match.Assists
+		champStats.TotalVisionScore += int64(match.VisionScore)
+		champStats.TotalDamage += int64(match.DamageToChampions)
+		champStats.TotalKillParticipation += match.KillParticipation
+		champStats.TotalGameTime += match.GameDuration
+
+		if isClassicMode(match.GameMode) {
+			champStats.ClassicGameTime += match.GameDuration
+			champStats.ClassicCS += int64(match.TotalMinionsKilled)
+			champStats.ClassicGold += int64(match.GoldEarned)
+			champStats.ClassicGameCount++
+		}
+
+		if match.GameCreation > champStats.LastPlayed {
+			champStats.LastPlayed = match.GameCreation
+		}
+
+		if match.KDA > champStats.BestKDA {
+			champStats.BestKDA = match.KDA
+		}
+		if match.KDA < champStats.WorstKDA {
+			champStats.WorstKDA = match.KDA
+		}
+	}
+
+	return stats
 }

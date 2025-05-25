@@ -303,4 +303,73 @@ export interface ChampionStats {
 export interface PlayerDashboardData {
     summary: RecentGamesSummary;
     matches: PlayerMatchStats[];
+}
+
+// Pagination types for infinite scroll
+export interface PaginationInfo {
+    offset: number;
+    limit: number;
+    total: number;
+    hasMore: boolean;
+}
+
+export interface IncrementalStats {
+    matchCount: number;
+    wins: number;
+    totalKills: number;
+    totalDeaths: number;
+    totalAssists: number;
+    totalGameTime: number;
+    totalVisionScore: number;
+    totalDamage: number;
+    totalKillParticipation: number;
+    classicGameTime: number;
+    classicCS: number;
+    classicGold: number;
+    classicGameCount: number;
+    roleBreakdown: Record<string, IncrementalRoleStats>;
+    championBreakdown: Record<string, IncrementalChampionStats>;
+}
+
+export interface IncrementalRoleStats {
+    gamesPlayed: number;
+    wins: number;
+    totalKills: number;
+    totalDeaths: number;
+    totalAssists: number;
+    totalVisionScore: number;
+    totalDamage: number;
+    totalKillParticipation: number;
+    totalGameTime: number;
+    classicGameTime: number;
+    classicCS: number;
+    classicGold: number;
+    classicGameCount: number;
+}
+
+export interface IncrementalChampionStats {
+    championId: number;
+    gamesPlayed: number;
+    wins: number;
+    totalKills: number;
+    totalDeaths: number;
+    totalAssists: number;
+    totalVisionScore: number;
+    totalDamage: number;
+    totalKillParticipation: number;
+    totalGameTime: number;
+    classicGameTime: number;
+    classicCS: number;
+    classicGold: number;
+    classicGameCount: number;
+    lastPlayed: number;
+    bestKDA: number;
+    worstKDA: number;
+}
+
+export interface PaginatedDashboardResponse {
+    summary: RecentGamesSummary | null;
+    matches: PlayerMatchStats[];
+    pagination: PaginationInfo;
+    incrementalStats: IncrementalStats | null;
 } 

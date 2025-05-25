@@ -1,7 +1,7 @@
-import React, { useState, useEffect, FormEvent } from 'react';
+import React, { useState, useEffect, FormEvent, useRef, useCallback } from 'react';
 import axios from 'axios';
 import './App.css';
-import { UserPerformance, StaticGameData, PlayerMatchStats, RecentGamesSummary, PlayerDashboardData } from './types';
+import { UserPerformance, StaticGameData, PlayerMatchStats, RecentGamesSummary, PaginatedDashboardResponse, IncrementalStats } from './types';
 import dayjs from 'dayjs';
 // @ts-ignore
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -13,19 +13,225 @@ const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:808
 type SortColumn = 'champion' | 'games' | 'winrate' | 'kda' | 'cs' | 'damage' | 'lastPlayed';
 type SortDirection = 'asc' | 'desc';
 
-// interface AggregatedStats {
-//   winRate: number;
-//   wins: number;
-//   losses: number;
-//   matchesPlayed: number;
-//   kda: number;
-//   avgKills: number;
-//   avgDeaths: number;
-//   avgAssists: number;
-//   totalKills: number;
-//   totalDeaths: number;
-//   totalAssists: number;
-// }
+// Function to merge incremental stats with existing summary
+const mergeIncrementalStats = (
+  currentSummary: RecentGamesSummary,
+  incrementalStats: IncrementalStats
+): RecentGamesSummary => {
+  if (!incrementalStats || incrementalStats.matchCount === 0) {
+    return currentSummary;
+  }
+
+  // Clone the current summary to avoid mutations
+  const newSummary = JSON.parse(JSON.stringify(currentSummary)) as RecentGamesSummary;
+  
+  // Update total matches
+  newSummary.totalMatches += incrementalStats.matchCount;
+  
+  // Update overall stats
+  const overall = newSummary.overallStats;
+  overall.wins += incrementalStats.wins;
+  overall.losses += incrementalStats.matchCount - incrementalStats.wins;
+  overall.totalKills += incrementalStats.totalKills;
+  overall.totalDeaths += incrementalStats.totalDeaths;
+  overall.totalAssists += incrementalStats.totalAssists;
+  overall.totalGameTime += incrementalStats.totalGameTime;
+  
+  // Recalculate averages
+  overall.winRate = (overall.wins / newSummary.totalMatches) * 100;
+  overall.avgKills = overall.totalKills / newSummary.totalMatches;
+  overall.avgDeaths = overall.totalDeaths / newSummary.totalMatches;
+  overall.avgAssists = overall.totalAssists / newSummary.totalMatches;
+  overall.avgGameDuration = overall.totalGameTime / newSummary.totalMatches;
+  
+  // Recalculate KDA
+  if (overall.totalDeaths > 0) {
+    overall.overallKDA = (overall.totalKills + overall.totalAssists) / overall.totalDeaths;
+  } else {
+    overall.overallKDA = overall.totalKills + overall.totalAssists;
+  }
+  
+  // Update vision score and damage
+  const totalVisionScore = overall.avgVisionScore * currentSummary.totalMatches + incrementalStats.totalVisionScore;
+  const totalDamage = overall.avgDamageToChampions * currentSummary.totalMatches + incrementalStats.totalDamage;
+  const totalKillParticipation = overall.avgKillParticipation * currentSummary.totalMatches + incrementalStats.totalKillParticipation;
+  
+  overall.avgVisionScore = totalVisionScore / newSummary.totalMatches;
+  overall.avgDamageToChampions = totalDamage / newSummary.totalMatches;
+  overall.avgKillParticipation = totalKillParticipation / newSummary.totalMatches;
+  
+  // Update CS and Gold per minute using classic game stats
+  const currentClassicGameTime = overall.avgCSPerMin * currentSummary.totalMatches * 60;
+  const currentClassicCS = overall.avgCSPerMin * currentClassicGameTime / 60;
+  const currentClassicGold = overall.avgGoldPerMin * currentClassicGameTime / 60;
+  
+  const newClassicGameTime = currentClassicGameTime + incrementalStats.classicGameTime;
+  const newClassicCS = currentClassicCS + incrementalStats.classicCS;
+  const newClassicGold = currentClassicGold + incrementalStats.classicGold;
+  
+  if (newClassicGameTime > 0) {
+    overall.avgCSPerMin = (newClassicCS / newClassicGameTime) * 60;
+    overall.avgGoldPerMin = (newClassicGold / newClassicGameTime) * 60;
+  }
+  
+  // Update role stats
+  for (const [role, incRoleStats] of Object.entries(incrementalStats.roleBreakdown)) {
+    if (!newSummary.roleStats[role]) {
+      newSummary.roleStats[role] = {
+        role,
+        gamesPlayed: 0,
+        wins: 0,
+        losses: 0,
+        winRate: 0,
+        totalKills: 0,
+        totalDeaths: 0,
+        totalAssists: 0,
+        avgKills: 0,
+        avgDeaths: 0,
+        avgAssists: 0,
+        roleKDA: 0,
+        avgVisionScore: 0,
+        avgCSPerMin: 0,
+        avgGoldPerMin: 0,
+        avgDamageToChampions: 0,
+        avgKillParticipation: 0,
+      };
+    }
+    
+    const roleStats = newSummary.roleStats[role];
+    roleStats.gamesPlayed += incRoleStats.gamesPlayed;
+    roleStats.wins += incRoleStats.wins;
+    roleStats.losses += incRoleStats.gamesPlayed - incRoleStats.wins;
+    roleStats.totalKills += incRoleStats.totalKills;
+    roleStats.totalDeaths += incRoleStats.totalDeaths;
+    roleStats.totalAssists += incRoleStats.totalAssists;
+    
+    // Recalculate role averages
+    roleStats.winRate = (roleStats.wins / roleStats.gamesPlayed) * 100;
+    roleStats.avgKills = roleStats.totalKills / roleStats.gamesPlayed;
+    roleStats.avgDeaths = roleStats.totalDeaths / roleStats.gamesPlayed;
+    roleStats.avgAssists = roleStats.totalAssists / roleStats.gamesPlayed;
+    
+    if (roleStats.totalDeaths > 0) {
+      roleStats.roleKDA = (roleStats.totalKills + roleStats.totalAssists) / roleStats.totalDeaths;
+    } else {
+      roleStats.roleKDA = roleStats.totalKills + roleStats.totalAssists;
+    }
+    
+    // Update other averages
+    const currentRoleVision = roleStats.avgVisionScore * (roleStats.gamesPlayed - incRoleStats.gamesPlayed);
+    const currentRoleDamage = roleStats.avgDamageToChampions * (roleStats.gamesPlayed - incRoleStats.gamesPlayed);
+    const currentRoleKP = roleStats.avgKillParticipation * (roleStats.gamesPlayed - incRoleStats.gamesPlayed);
+    
+    roleStats.avgVisionScore = (currentRoleVision + incRoleStats.totalVisionScore) / roleStats.gamesPlayed;
+    roleStats.avgDamageToChampions = (currentRoleDamage + incRoleStats.totalDamage) / roleStats.gamesPlayed;
+    roleStats.avgKillParticipation = (currentRoleKP + incRoleStats.totalKillParticipation) / roleStats.gamesPlayed;
+    
+    // Update CS and Gold per minute for role
+    if (incRoleStats.classicGameTime > 0) {
+      const currentRoleClassicTime = roleStats.avgCSPerMin * (roleStats.gamesPlayed - incRoleStats.gamesPlayed) * 60;
+      const currentRoleCS = roleStats.avgCSPerMin * currentRoleClassicTime / 60;
+      const currentRoleGold = roleStats.avgGoldPerMin * currentRoleClassicTime / 60;
+      
+      const newRoleClassicTime = currentRoleClassicTime + incRoleStats.classicGameTime;
+      const newRoleCS = currentRoleCS + incRoleStats.classicCS;
+      const newRoleGold = currentRoleGold + incRoleStats.classicGold;
+      
+      if (newRoleClassicTime > 0) {
+        roleStats.avgCSPerMin = (newRoleCS / newRoleClassicTime) * 60;
+        roleStats.avgGoldPerMin = (newRoleGold / newRoleClassicTime) * 60;
+      }
+    }
+  }
+  
+  // Update champion stats
+  for (const [championName, incChampStats] of Object.entries(incrementalStats.championBreakdown)) {
+    if (!newSummary.championStats[championName]) {
+      newSummary.championStats[championName] = {
+        championName,
+        championId: incChampStats.championId,
+        gamesPlayed: 0,
+        wins: 0,
+        losses: 0,
+        winRate: 0,
+        totalKills: 0,
+        totalDeaths: 0,
+        totalAssists: 0,
+        avgKills: 0,
+        avgDeaths: 0,
+        avgAssists: 0,
+        championKDA: 0,
+        bestKDA: -1,
+        worstKDA: 999999,
+        avgVisionScore: 0,
+        avgCSPerMin: 0,
+        avgGoldPerMin: 0,
+        avgDamageToChampions: 0,
+        avgKillParticipation: 0,
+        lastPlayed: 0,
+      };
+    }
+    
+    const champStats = newSummary.championStats[championName];
+    champStats.gamesPlayed += incChampStats.gamesPlayed;
+    champStats.wins += incChampStats.wins;
+    champStats.losses += incChampStats.gamesPlayed - incChampStats.wins;
+    champStats.totalKills += incChampStats.totalKills;
+    champStats.totalDeaths += incChampStats.totalDeaths;
+    champStats.totalAssists += incChampStats.totalAssists;
+    
+    // Recalculate champion averages
+    champStats.winRate = (champStats.wins / champStats.gamesPlayed) * 100;
+    champStats.avgKills = champStats.totalKills / champStats.gamesPlayed;
+    champStats.avgDeaths = champStats.totalDeaths / champStats.gamesPlayed;
+    champStats.avgAssists = champStats.totalAssists / champStats.gamesPlayed;
+    
+    if (champStats.totalDeaths > 0) {
+      champStats.championKDA = (champStats.totalKills + champStats.totalAssists) / champStats.totalDeaths;
+    } else {
+      champStats.championKDA = champStats.totalKills + champStats.totalAssists;
+    }
+    
+    // Update best/worst KDA and last played
+    if (incChampStats.bestKDA > champStats.bestKDA) {
+      champStats.bestKDA = incChampStats.bestKDA;
+    }
+    if (incChampStats.worstKDA < champStats.worstKDA) {
+      champStats.worstKDA = incChampStats.worstKDA;
+    }
+    if (incChampStats.lastPlayed > champStats.lastPlayed) {
+      champStats.lastPlayed = incChampStats.lastPlayed;
+    }
+    
+    // Update other averages
+    const currentChampVision = champStats.avgVisionScore * (champStats.gamesPlayed - incChampStats.gamesPlayed);
+    const currentChampDamage = champStats.avgDamageToChampions * (champStats.gamesPlayed - incChampStats.gamesPlayed);
+    const currentChampKP = champStats.avgKillParticipation * (champStats.gamesPlayed - incChampStats.gamesPlayed);
+    
+    champStats.avgVisionScore = (currentChampVision + incChampStats.totalVisionScore) / champStats.gamesPlayed;
+    champStats.avgDamageToChampions = (currentChampDamage + incChampStats.totalDamage) / champStats.gamesPlayed;
+    champStats.avgKillParticipation = (currentChampKP + incChampStats.totalKillParticipation) / champStats.gamesPlayed;
+    
+    // Update CS and Gold per minute for champion
+    if (incChampStats.classicGameTime > 0) {
+      const currentChampClassicTime = champStats.avgCSPerMin * (champStats.gamesPlayed - incChampStats.gamesPlayed) * 60;
+      const currentChampCS = champStats.avgCSPerMin * currentChampClassicTime / 60;
+      const currentChampGold = champStats.avgGoldPerMin * currentChampClassicTime / 60;
+      
+      const newChampClassicTime = currentChampClassicTime + incChampStats.classicGameTime;
+      const newChampCS = currentChampCS + incChampStats.classicCS;
+      const newChampGold = currentChampGold + incChampStats.classicGold;
+      
+      if (newChampClassicTime > 0) {
+        champStats.avgCSPerMin = (newChampCS / newChampClassicTime) * 60;
+        champStats.avgGoldPerMin = (newChampGold / newChampClassicTime) * 60;
+      }
+    }
+  }
+  
+  newSummary.lastUpdated = Date.now();
+  return newSummary;
+};
 
 function App() {
   const [gameName, setGameName] = useState('');
@@ -54,6 +260,70 @@ function App() {
   // const [lifetimeStats, setLifetimeStats] = useState<AggregatedStats | null>(null);
   // const [currentSeasonStats, setCurrentSeasonStats] = useState<AggregatedStats | null>(null);
   // const [filteredSeasonalStats, setFilteredSeasonalStats] = useState<AggregatedStats | null>(null);
+
+  // Infinite scroll state
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Load more matches function
+  const loadMoreMatches = useCallback(async () => {
+    if (!playerData || isLoadingMore || !hasMore) return;
+    
+    // Cancel previous request if any
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    abortControllerRef.current = new AbortController();
+    setIsLoadingMore(true);
+    
+    try {
+      const response = await axios.get<PaginatedDashboardResponse>(
+        `${API_BASE_URL}/player/${region}/${gameName}/${tagLine}/dashboard?count=10&offset=${playerData.matches.length}`,
+        { signal: abortControllerRef.current.signal }
+      );
+      
+      // Update player data with new matches
+      setPlayerData(prev => ({
+        ...prev!,
+        matches: [...prev!.matches, ...response.data.matches]
+      }));
+      
+      // Merge incremental stats if available
+      if (response.data.incrementalStats && recentGamesSummary) {
+        const updatedSummary = mergeIncrementalStats(recentGamesSummary, response.data.incrementalStats);
+        setRecentGamesSummary(updatedSummary);
+      }
+      
+      // Update pagination state
+      setHasMore(response.data.pagination.hasMore);
+      setVisibleMatches(prev => prev + response.data.matches.length);
+    } catch (error) {
+      if (axios.isCancel(error)) return; // Request was cancelled
+      console.error('Error loading more matches:', error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [playerData, isLoadingMore, hasMore, region, gameName, tagLine, recentGamesSummary]);
+
+  // Create last element ref callback for infinite scroll
+  const lastMatchElementRef = useCallback((node: HTMLDivElement | null) => {
+    if (isLoadingMore) return;
+    if (observerRef.current) observerRef.current.disconnect();
+    
+    observerRef.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore && !isLoadingMore) {
+        loadMoreMatches();
+      }
+    }, {
+      threshold: 0.1,
+      rootMargin: '200px' // Start loading 200px before reaching the end
+    });
+    
+    if (node) observerRef.current.observe(node);
+  }, [isLoadingMore, hasMore, loadMoreMatches]);
 
   // Preload common items when static data is loaded
   useEffect(() => {
@@ -149,17 +419,23 @@ function App() {
 
     try {
       // Use the new consolidated dashboard endpoint
-      const dashboardResponse = await axios.get<PlayerDashboardData>(`${API_BASE_URL}/player/${region}/${gameName}/${tagLine}/dashboard?count=25`);
+      const dashboardResponse = await axios.get<PaginatedDashboardResponse>(`${API_BASE_URL}/player/${region}/${gameName}/${tagLine}/dashboard?count=25`);
       
       // Extract the data from the consolidated response
       setPlayerData({
-        puuid: dashboardResponse.data.summary.puuid,
-        region: dashboardResponse.data.summary.region,
-        riotId: dashboardResponse.data.summary.riotId,
+        puuid: dashboardResponse.data.summary?.puuid || '',
+        region: dashboardResponse.data.summary?.region || region,
+        riotId: dashboardResponse.data.summary?.riotId || `${gameName}#${tagLine}`,
         matches: dashboardResponse.data.matches,
-        updatedAt: dashboardResponse.data.summary.lastUpdated
+        updatedAt: dashboardResponse.data.summary?.lastUpdated || Date.now()
       });
       setRecentGamesSummary(dashboardResponse.data.summary);
+      
+      // Reset infinite scroll state
+      setHasMore(dashboardResponse.data.pagination.hasMore);
+      setVisibleMatches(dashboardResponse.data.matches.length);
+      setIsLoadingMore(false);
+      
       console.log("Dashboard data:", dashboardResponse.data);
     } catch (err: any) {
       console.error("Error fetching player data:", err);
@@ -380,6 +656,114 @@ function App() {
     }
   };
 
+  // Memoized Match Card Component for better performance
+  const MatchCard = React.memo(({ 
+    match, 
+    staticData, 
+    onMatchClick,
+    isLastElement,
+    lastElementRef
+  }: {
+    match: PlayerMatchStats;
+    staticData: StaticGameData;
+    onMatchClick: (match: PlayerMatchStats) => void;
+    isLastElement?: boolean;
+    lastElementRef?: (node: HTMLDivElement | null) => void;
+  }) => {
+    const champIcon = getChampionIcon(match.championName, match.championId);
+    const isArena = match.gameMode === 'CHERRY' || match.queueId === 1700;
+    
+    return (
+      <div
+        ref={isLastElement ? lastElementRef : null}
+        className={`match-card ${match.win ? 'win' : 'loss'}`}
+        onClick={() => onMatchClick(match)}
+      >
+        <div className="match-result-indicator">
+          <span className="result-text">{match.win ? 'WIN' : 'LOSS'}</span>
+        </div>
+        
+        <div className="match-champion-section">
+          <div className="champion-info">
+            <img 
+              src={champIcon} 
+              alt={match.championName} 
+              className="champion-portrait"
+              onError={e => (e.currentTarget.src = 'placeholder.png')} 
+            />
+            <div className="champion-details">
+              <span className="champion-name">{match.championName}</span>
+              <span className="champion-level">Level {match.champLevel}</span>
+            </div>
+          </div>
+          
+          <div className="summoner-spells">
+            {match.summonerSpells.map((spellId, index) => (
+              <img
+                key={`spell-${index}-${spellId}`}
+                src={staticData ? `${dataDragonBase}/${getSummonerSpellImageURL(spellId)}` : ''}
+                alt={`Summoner Spell ${spellId}`}
+                className="summoner-spell"
+                onError={(e) => (e.currentTarget.src = 'placeholder.png')}
+              />
+            ))}
+          </div>
+        </div>
+        
+        <div className="match-stats-section">
+          <div className="kda-stats">
+            <div className="kda-main">
+              <span className="kda-numbers">{match.kills}/{match.deaths}/{match.assists}</span>
+              <span className="kda-ratio">{match.kda.toFixed(2)} KDA</span>
+            </div>
+          </div>
+          
+          <div className="performance-stats">
+            {!isArena ? (
+              <div className="stat-item">
+                <span className="stat-value">{getCsPerMin(match)}</span>
+                <span className="stat-label">CS/min</span>
+              </div>
+            ) : (
+              <div className="stat-item">
+                <span className="stat-value">{getArenaPlace(match)}</span>
+                <span className="stat-label">Place</span>
+              </div>
+            )}
+            
+            <div className="stat-item">
+              <span className="stat-value">{formatGameDuration(match.gameDuration)}</span>
+              <span className="stat-label">Duration</span>
+            </div>
+          </div>
+        </div>
+        
+        <div className="match-items-section">
+          <div className="item-build">
+            {match.items.slice(0, 6).map((itemId, index) => (
+              itemId > 0 ? (
+                <img
+                  key={index}
+                  src={staticData ? `${dataDragonBase}/${getItemImageURL(itemId)}` : ''}
+                  alt={`Item ${itemId}`}
+                  className="item-icon"
+                  onError={(e) => (e.currentTarget.src = 'placeholder.png')}
+                />
+              ) : (
+                <div key={index} className="item-icon empty" />
+              )
+            ))}
+          </div>
+        </div>
+        
+        <div className="match-meta-section">
+          <div className="game-mode">{getDisplayGameMode(match.gameMode, match.queueId)}</div>
+          <div className="time-ago">{formatTimeAgo(match.gameCreation)}</div>
+        </div>
+      </div>
+    );
+  });
+
   // Render: Recent Matches Section
   const renderRecentMatches = () => {
     if (!playerData || !playerData.matches || playerData.matches.length === 0 || !staticData) {
@@ -426,98 +810,19 @@ function App() {
               </div>
               
               <div className="matches-grid">
-                {matchesOnDate.map((match) => {
-                  const champIcon = getChampionIcon(match.championName, match.championId);
-                  const isArena = match.gameMode === 'CHERRY' || match.queueId === 1700;
+                {matchesOnDate.map((match, index) => {
+                  const isLastElement = index === matchesOnDate.length - 1 && 
+                                       date === dates[dates.length - 1];
                   
                   return (
-                    <div
+                    <MatchCard
                       key={match.matchId}
-                      className={`match-card ${match.win ? 'win' : 'loss'}`}
-                      onClick={() => handleMatchCardClick(match)}
-                    >
-                      <div className="match-result-indicator">
-                        <span className="result-text">{match.win ? 'WIN' : 'LOSS'}</span>
-                      </div>
-                      
-                      <div className="match-champion-section">
-                        <div className="champion-info">
-                          <img 
-                            src={champIcon} 
-                            alt={match.championName} 
-                            className="champion-portrait"
-                            onError={e => (e.currentTarget.src = 'placeholder.png')} 
-                          />
-                          <div className="champion-details">
-                            <span className="champion-name">{match.championName}</span>
-                            <span className="champion-level">Level {match.champLevel}</span>
-                          </div>
-                        </div>
-                        
-                        <div className="summoner-spells">
-                          {match.summonerSpells.map((spellId, index) => (
-                            <img
-                              key={`spell-${index}-${spellId}`}
-                              src={staticData ? `${dataDragonBase}/${getSummonerSpellImageURL(spellId)}` : ''}
-                              alt={`Summoner Spell ${spellId}`}
-                              className="summoner-spell"
-                              onError={(e) => (e.currentTarget.src = 'placeholder.png')}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                      
-                      <div className="match-stats-section">
-                        <div className="kda-stats">
-                          <div className="kda-main">
-                            <span className="kda-numbers">{match.kills}/{match.deaths}/{match.assists}</span>
-                            <span className="kda-ratio">{match.kda.toFixed(2)} KDA</span>
-                          </div>
-                        </div>
-                        
-                        <div className="performance-stats">
-                          {!isArena ? (
-                            <div className="stat-item">
-                              <span className="stat-value">{getCsPerMin(match)}</span>
-                              <span className="stat-label">CS/min</span>
-                            </div>
-                          ) : (
-                            <div className="stat-item">
-                              <span className="stat-value">{getArenaPlace(match)}</span>
-                              <span className="stat-label">Place</span>
-                            </div>
-                          )}
-                          
-                          <div className="stat-item">
-                            <span className="stat-value">{formatGameDuration(match.gameDuration)}</span>
-                            <span className="stat-label">Duration</span>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="match-items-section">
-                        <div className="item-build">
-                          {match.items.slice(0, 6).map((itemId, index) => (
-                            itemId > 0 ? (
-                              <img
-                                key={index}
-                                src={staticData ? `${dataDragonBase}/${getItemImageURL(itemId)}` : ''}
-                                alt={`Item ${itemId}`}
-                                className="item-icon"
-                                onError={(e) => (e.currentTarget.src = 'placeholder.png')}
-                              />
-                            ) : (
-                              <div key={index} className="item-icon empty" />
-                            )
-                          ))}
-                        </div>
-                      </div>
-                      
-                      <div className="match-meta-section">
-                        <div className="game-mode">{getDisplayGameMode(match.gameMode, match.queueId)}</div>
-                        <div className="time-ago">{formatTimeAgo(match.gameCreation)}</div>
-                      </div>
-                    </div>
+                      match={match}
+                      staticData={staticData}
+                      onMatchClick={handleMatchCardClick}
+                      isLastElement={isLastElement}
+                      lastElementRef={isLastElement ? lastMatchElementRef : undefined}
+                    />
                   );
                 })}
               </div>
@@ -529,11 +834,11 @@ function App() {
           </div>
         )}
         
-        {playerData && playerData.matches.length > visibleMatches && (
-          <div className="load-more-section">
-            <button className="load-more-btn" onClick={() => setVisibleMatches(visibleMatches + 10)}>
-              Load More Matches
-            </button>
+        {/* Loading indicator for infinite scroll */}
+        {isLoadingMore && (
+          <div className="loading-more-section">
+            <div className="loading-spinner"></div>
+            <span>Loading more matches...</span>
           </div>
         )}
       </div>

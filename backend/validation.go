@@ -303,3 +303,27 @@ func PreventNoSQLInjection(input string) error {
 
 	return nil
 }
+
+// ValidateOffset validates offset parameters for pagination
+func ValidateOffset(offsetStr string, defaultValue int) (int, error) {
+	if offsetStr == "" {
+		return defaultValue, nil
+	}
+
+	offset, err := strconv.Atoi(offsetStr)
+	if err != nil {
+		return 0, ValidationError{Field: "offset", Message: "offset must be a valid integer"}
+	}
+
+	if offset < 0 {
+		return 0, ValidationError{Field: "offset", Message: "offset cannot be negative"}
+	}
+
+	// Set a reasonable maximum offset to prevent abuse
+	const maxOffset = 10000
+	if offset > maxOffset {
+		return 0, ValidationError{Field: "offset", Message: fmt.Sprintf("offset cannot exceed %d", maxOffset)}
+	}
+
+	return offset, nil
+}

@@ -397,3 +397,76 @@ type PlayerDashboardData struct {
 	Summary *RecentGamesSummary `json:"summary"`
 	Matches []PlayerMatchStats  `json:"matches"`
 }
+
+// PaginationInfo contains pagination metadata
+type PaginationInfo struct {
+	Offset  int  `json:"offset"`
+	Limit   int  `json:"limit"`
+	Total   int  `json:"total"`
+	HasMore bool `json:"hasMore"`
+}
+
+// IncrementalStats represents stats calculated for a subset of matches
+type IncrementalStats struct {
+	MatchCount             int     `json:"matchCount"`
+	Wins                   int     `json:"wins"`
+	TotalKills             int     `json:"totalKills"`
+	TotalDeaths            int     `json:"totalDeaths"`
+	TotalAssists           int     `json:"totalAssists"`
+	TotalGameTime          int64   `json:"totalGameTime"`
+	TotalVisionScore       int64   `json:"totalVisionScore"`
+	TotalDamage            int64   `json:"totalDamage"`
+	TotalKillParticipation float64 `json:"totalKillParticipation"`
+	// For Classic mode only
+	ClassicGameTime  int64 `json:"classicGameTime"`
+	ClassicCS        int64 `json:"classicCS"`
+	ClassicGold      int64 `json:"classicGold"`
+	ClassicGameCount int   `json:"classicGameCount"`
+	// Breakdown by role and champion
+	RoleBreakdown     map[string]*IncrementalRoleStats     `json:"roleBreakdown"`
+	ChampionBreakdown map[string]*IncrementalChampionStats `json:"championBreakdown"`
+}
+
+type IncrementalRoleStats struct {
+	GamesPlayed            int     `json:"gamesPlayed"`
+	Wins                   int     `json:"wins"`
+	TotalKills             int     `json:"totalKills"`
+	TotalDeaths            int     `json:"totalDeaths"`
+	TotalAssists           int     `json:"totalAssists"`
+	TotalVisionScore       int64   `json:"totalVisionScore"`
+	TotalDamage            int64   `json:"totalDamage"`
+	TotalKillParticipation float64 `json:"totalKillParticipation"`
+	TotalGameTime          int64   `json:"totalGameTime"`
+	ClassicGameTime        int64   `json:"classicGameTime"`
+	ClassicCS              int64   `json:"classicCS"`
+	ClassicGold            int64   `json:"classicGold"`
+	ClassicGameCount       int     `json:"classicGameCount"`
+}
+
+type IncrementalChampionStats struct {
+	ChampionID             int     `json:"championId"`
+	GamesPlayed            int     `json:"gamesPlayed"`
+	Wins                   int     `json:"wins"`
+	TotalKills             int     `json:"totalKills"`
+	TotalDeaths            int     `json:"totalDeaths"`
+	TotalAssists           int     `json:"totalAssists"`
+	TotalVisionScore       int64   `json:"totalVisionScore"`
+	TotalDamage            int64   `json:"totalDamage"`
+	TotalKillParticipation float64 `json:"totalKillParticipation"`
+	TotalGameTime          int64   `json:"totalGameTime"`
+	ClassicGameTime        int64   `json:"classicGameTime"`
+	ClassicCS              int64   `json:"classicCS"`
+	ClassicGold            int64   `json:"classicGold"`
+	ClassicGameCount       int     `json:"classicGameCount"`
+	LastPlayed             int64   `json:"lastPlayed"`
+	BestKDA                float64 `json:"bestKDA"`
+	WorstKDA               float64 `json:"worstKDA"`
+}
+
+// PaginatedDashboardResponse contains paginated dashboard data
+type PaginatedDashboardResponse struct {
+	Summary          *RecentGamesSummary `json:"summary"`
+	Matches          []PlayerMatchStats  `json:"matches"`
+	Pagination       PaginationInfo      `json:"pagination"`
+	IncrementalStats *IncrementalStats   `json:"incrementalStats"`
+}

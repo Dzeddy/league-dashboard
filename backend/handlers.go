@@ -76,7 +76,7 @@ func getPlayerPerformanceHandler(app *GlobalAppData) http.HandlerFunc {
 			}
 		}
 
-		performance, err := fetchAndStoreUserPerformance(app, validatedRegion, validatedGameName, validatedTagLine, count, queueID)
+		performance, err := fetchAndStoreUserPerformance(app, validatedRegion, validatedGameName, validatedTagLine, count, queueID, 0)
 		if err != nil {
 			log.Printf("Error fetching user performance for %s#%s: %v", validatedGameName, validatedTagLine, err)
 			http.Error(w, fmt.Sprintf("Error fetching user performance: %v", err), http.StatusInternalServerError)
@@ -376,8 +376,9 @@ func getPlayerDashboardHandler(app *GlobalAppData) http.HandlerFunc {
 
 		countStr := r.URL.Query().Get("count")
 		queueIDStr := r.URL.Query().Get("queueId")
+		offsetStr := r.URL.Query().Get("offset")
 
-		// Validate and sanitize input parameters
+		// Input validation
 		validatedGameName, validatedTagLine, validatedRegion, err := ValidateAndSanitizeInput(gameName, tagLine, region)
 		if err != nil {
 			log.Printf("Input validation error: %v", err)
@@ -385,7 +386,7 @@ func getPlayerDashboardHandler(app *GlobalAppData) http.HandlerFunc {
 			return
 		}
 
-		// Additional NoSQL injection prevention
+		// NoSQL injection prevention
 		if err := PreventNoSQLInjection(validatedGameName); err != nil {
 			log.Printf("Potential NoSQL injection attempt in gameName: %s", validatedGameName)
 			http.Error(w, "Invalid input detected", http.StatusBadRequest)
@@ -397,7 +398,7 @@ func getPlayerDashboardHandler(app *GlobalAppData) http.HandlerFunc {
 			return
 		}
 
-		// Validate count parameter
+		// Parameter validation
 		count, err := ValidateCount(countStr, defaultMatchCount, 100)
 		if err != nil {
 			log.Printf("Count validation error: %v", err)
@@ -405,7 +406,6 @@ func getPlayerDashboardHandler(app *GlobalAppData) http.HandlerFunc {
 			return
 		}
 
-		// Validate queueID parameter
 		queueID, err := ValidateQueueID(queueIDStr, defaultQueueID)
 		if err != nil {
 			log.Printf("QueueID validation error: %v", err)
@@ -413,7 +413,14 @@ func getPlayerDashboardHandler(app *GlobalAppData) http.HandlerFunc {
 			return
 		}
 
-		log.Printf("Handler: Received player dashboard request for %s#%s in region %s, count: %d, queueId: %d", validatedGameName, validatedTagLine, validatedRegion, count, queueID)
+		offset, err := ValidateOffset(offsetStr, 0)
+		if err != nil {
+			log.Printf("Offset validation error: %v", err)
+			http.Error(w, fmt.Sprintf("Invalid offset parameter: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		log.Printf("Handler: Received player dashboard request for %s#%s in region %s, count: %d, queueId: %d, offset: %d", validatedGameName, validatedTagLine, validatedRegion, count, queueID, offset)
 
 		if app.riotAPIKey == "" {
 			log.Println("Error: RIOT_API_KEY is not set.")
@@ -431,21 +438,46 @@ func getPlayerDashboardHandler(app *GlobalAppData) http.HandlerFunc {
 			}
 		}
 
-		// Fetch user performance data once
-		userPerformance, err := fetchAndStoreUserPerformance(app, validatedRegion, validatedGameName, validatedTagLine, count, queueID)
+		// Fetch user performance
+		userPerformance, err := fetchAndStoreUserPerformance(app, validatedRegion, validatedGameName, validatedTagLine, count, queueID, offset)
 		if err != nil {
 			log.Printf("Error fetching user performance for %s#%s: %v", validatedGameName, validatedTagLine, err)
 			http.Error(w, fmt.Sprintf("Error fetching user performance: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		// Calculate summary from the same data
-		summary := calculateRecentGamesSummary(userPerformance.Matches, userPerformance.PUUID, userPerformance.Region, userPerformance.RiotID)
+		// Calculate incremental stats for the returned matches
+		incrementalStats := calculateIncrementalStats(userPerformance.Matches)
 
-		// Combine both into dashboard data
-		dashboardData := PlayerDashboardData{
-			Summary: summary,
-			Matches: userPerformance.Matches,
+		// Prepare pagination info
+		hasMore := len(userPerformance.Matches) == count
+		pagination := PaginationInfo{
+			Offset:  offset,
+			Limit:   count,
+			Total:   -1, // We don't know the total
+			HasMore: hasMore,
+		}
+
+		// Prepare response
+		var dashboardData PaginatedDashboardResponse
+
+		if offset == 0 {
+			// First page: include full summary
+			summary := calculateRecentGamesSummary(userPerformance.Matches, userPerformance.PUUID, userPerformance.Region, userPerformance.RiotID)
+			dashboardData = PaginatedDashboardResponse{
+				Summary:          summary,
+				Matches:          userPerformance.Matches,
+				Pagination:       pagination,
+				IncrementalStats: incrementalStats,
+			}
+		} else {
+			// Subsequent pages: no summary, just matches and incremental stats
+			dashboardData = PaginatedDashboardResponse{
+				Summary:          nil,
+				Matches:          userPerformance.Matches,
+				Pagination:       pagination,
+				IncrementalStats: incrementalStats,
+			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
