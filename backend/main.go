@@ -27,7 +27,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
-	"golang.org/x/crypto/acme/autocert"
 )
 
 var app GlobalAppData
@@ -352,53 +351,34 @@ func main() {
 
 	apiRouter.HandleFunc("/popular-items", getPopularItemsHandler(&app)).Methods("GET", "OPTIONS")
 
+	// Check if SSL should be enabled (default: true)
+	useSSL := os.Getenv("USE_SSL")
+	if useSSL == "" {
+		useSSL = "true" // Default to SSL enabled
+	}
+
+	// Get port configuration
+	port := os.Getenv("PORT")
+	if port == "" {
+		if useSSL == "true" {
+			port = "8443" // Default HTTPS port
+		} else {
+			port = "8080" // Default HTTP port
+		}
+	}
+
 	srv := &http.Server{
 		Handler:      handlers.CompressHandler(r),
+		Addr:         ":" + port,
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 	}
 
-	useSSL := os.Getenv("USE_SSL")
-	if useSSL == "" {
-		useSSL = "true"
-	}
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		if useSSL == "true" {
-			port = "443" // Changed from 8443 to standard HTTPS port
-		} else {
-			port = "8080"
-		}
-	}
-
 	if useSSL == "true" {
-		// Get domain configuration for Let's Encrypt
-		domains := os.Getenv("AUTOCERT_DOMAINS")
-		email := os.Getenv("AUTOCERT_EMAIL")
-
-		if domains == "" {
-			log.Println("WARNING: AUTOCERT_DOMAINS not set. Using example domains. Please set this environment variable with your actual domains.")
-			domains = "yourdomain.com,www.yourdomain.com"
-		}
-
-		if email == "" {
-			log.Println("WARNING: AUTOCERT_EMAIL not set. Using example email. Please set this environment variable with your actual email.")
-			email = "your-email@example.com"
-		}
-
-		// Parse domains from comma-separated string
-		domainList := strings.Split(domains, ",")
-		for i, domain := range domainList {
-			domainList[i] = strings.TrimSpace(domain)
-		}
-
-		// Let's Encrypt autocert configuration
-		certManager := &autocert.Manager{
-			Prompt:     autocert.AcceptTOS,
-			Cache:      autocert.DirCache("certs"),            // Stores certificates in ./certs directory
-			HostPolicy: autocert.HostWhitelist(domainList...), // Use configured domains
-			Email:      email,                                 // Optional but recommended
+		// Set up SSL certificates
+		certFile, keyFile, err := ensureSSLCerts()
+		if err != nil {
+			log.Fatalf("Failed to set up SSL certificates: %v", err)
 		}
 
 		// Configure TLS
@@ -411,26 +391,16 @@ func main() {
 				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 			},
-			GetCertificate: certManager.GetCertificate,
 		}
 		srv.TLSConfig = tlsConfig
-		srv.Addr = ":443"
 
-		// Start HTTP server for Let's Encrypt challenges and redirect
-		go func() {
-			h := certManager.HTTPHandler(nil)
-			log.Printf("Starting HTTP server for Let's Encrypt challenges on :80")
-			log.Fatal(http.ListenAndServe(":80", h))
-		}()
+		log.Printf("Starting HTTPS server on :%s", port)
+		log.Printf("Using SSL certificate: %s", certFile)
 
-		log.Printf("Starting HTTPS server with Let's Encrypt on :443")
-		log.Printf("Configured domains: %v", domainList)
-		log.Printf("Contact email: %s", email)
-		if err := srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Could not start HTTPS server: %v\n", err)
+		if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Could not start HTTPS server on :%s: %v\n", port, err)
 		}
 	} else {
-		srv.Addr = ":" + port
 		log.Printf("Starting HTTP server on :%s", port)
 		log.Println("WARNING: SSL is disabled. This should only be used for development!")
 
