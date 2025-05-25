@@ -1,7 +1,7 @@
 import React, { useState, useEffect, FormEvent } from 'react';
 import axios from 'axios';
 import './App.css';
-import { UserPerformance, StaticGameData, PlayerMatchStats, RecentGamesSummary } from './types';
+import { UserPerformance, StaticGameData, PlayerMatchStats, RecentGamesSummary, PlayerDashboardData } from './types';
 import dayjs from 'dayjs';
 // @ts-ignore
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -148,16 +148,19 @@ function App() {
     // setCurrentSeasonStats(null);
 
     try {
-      // Fetch both regular data and enhanced summary
-      const [performanceResponse, summaryResponse] = await Promise.all([
-        axios.get<UserPerformance>(`${API_BASE_URL}/player/${region}/${gameName}/${tagLine}/matches?count=25`),
-        axios.get<RecentGamesSummary>(`${API_BASE_URL}/player/${region}/${gameName}/${tagLine}/summary?count=25`)
-      ]);
+      // Use the new consolidated dashboard endpoint
+      const dashboardResponse = await axios.get<PlayerDashboardData>(`${API_BASE_URL}/player/${region}/${gameName}/${tagLine}/dashboard?count=25`);
       
-      setPlayerData(performanceResponse.data);
-      setRecentGamesSummary(summaryResponse.data);
-      console.log("Player data:", performanceResponse.data);
-      console.log("Recent games summary:", summaryResponse.data);
+      // Extract the data from the consolidated response
+      setPlayerData({
+        puuid: dashboardResponse.data.summary.puuid,
+        region: dashboardResponse.data.summary.region,
+        riotId: dashboardResponse.data.summary.riotId,
+        matches: dashboardResponse.data.matches,
+        updatedAt: dashboardResponse.data.summary.lastUpdated
+      });
+      setRecentGamesSummary(dashboardResponse.data.summary);
+      console.log("Dashboard data:", dashboardResponse.data);
     } catch (err: any) {
       console.error("Error fetching player data:", err);
       if (err.response && err.response.data) {

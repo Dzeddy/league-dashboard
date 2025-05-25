@@ -20,10 +20,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/handlers"
-	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -280,6 +281,38 @@ func parseRedisConfig() (addr, password string, db int, err error) {
 	return
 }
 
+// createIndexes creates MongoDB indexes for optimal query performance
+func createIndexes(client *mongo.Client, database string) error {
+	collection := client.Database(database).Collection("userperformances")
+
+	indexes := []mongo.IndexModel{
+		{
+			Keys: bson.D{
+				{Key: "_id", Value: 1},
+				{Key: "region", Value: 1},
+			},
+		},
+		{
+			Keys: bson.D{
+				{Key: "updatedAt", Value: -1},
+			},
+		},
+		{
+			Keys: bson.D{
+				{Key: "matches.matchId", Value: 1},
+			},
+		},
+	}
+
+	_, err := collection.Indexes().CreateMany(context.Background(), indexes)
+	if err != nil {
+		return fmt.Errorf("failed to create indexes: %v", err)
+	}
+
+	log.Println("Successfully created MongoDB indexes for userperformances collection")
+	return nil
+}
+
 func main() {
 	log.Println("Starting League Performance Tracker backend...")
 
@@ -347,6 +380,11 @@ func main() {
 	}
 	log.Println("Successfully connected to MongoDB.")
 
+	// Create MongoDB indexes for optimal query performance
+	if err := createIndexes(app.mongoClient, app.mongoDatabase); err != nil {
+		log.Printf("Warning: Failed to create MongoDB indexes: %v", err)
+	}
+
 	log.Println("Initiating population of static data...")
 	if err := populateStaticData(&app); err != nil {
 		log.Fatalf("CRITICAL: Failed to populate static data on startup: %v. Application cannot start correctly.", err)
@@ -354,20 +392,30 @@ func main() {
 		log.Println("Static data population complete. All static data is preloaded and cached in memory.")
 	}
 
-	r := mux.NewRouter()
+	r := chi.NewRouter()
 
 	r.Use(corsMiddleware)
 
-	apiRouter := r.PathPrefix("/api").Subrouter()
-	apiRouter.Use(corsMiddleware)
+	r.Route("/api", func(api chi.Router) {
+		api.Options("/*", func(w http.ResponseWriter, r *http.Request) {
+			// CORS preflight response is handled by corsMiddleware
+			w.WriteHeader(http.StatusOK)
+		})
 
-	apiRouter.HandleFunc("/health", healthCheckHandler).Methods("GET", "OPTIONS")
-	apiRouter.HandleFunc("/player/{region}/{gameName}/{tagLine}/matches", getPlayerPerformanceHandler(&app)).Methods("GET", "OPTIONS")
-	apiRouter.HandleFunc("/player/{region}/{gameName}/{tagLine}/summary", getRecentGamesSummaryHandler(&app)).Methods("GET", "OPTIONS")
-	apiRouter.HandleFunc("/static-data", getStaticDataHandler(&app)).Methods("GET", "OPTIONS")
-	apiRouter.HandleFunc("/match/{region}/{matchId}", getMatchDetailsHandler(&app)).Methods("GET", "OPTIONS")
+		api.Get("/health", healthCheckHandler)
 
-	apiRouter.HandleFunc("/popular-items", getPopularItemsHandler(&app)).Methods("GET", "OPTIONS")
+		// New consolidated dashboard endpoint that combines matches and summary
+		api.Get("/player/{region}/{gameName}/{tagLine}/dashboard", getPlayerDashboardHandler(&app))
+
+		// Legacy endpoints (kept for backward compatibility during transition)
+		api.Get("/player/{region}/{gameName}/{tagLine}/matches", getPlayerPerformanceHandler(&app))
+		api.Get("/player/{region}/{gameName}/{tagLine}/summary", getRecentGamesSummaryHandler(&app))
+
+		api.Get("/static-data", getStaticDataHandler(&app))
+		api.Get("/match/{region}/{matchId}", getMatchDetailsHandler(&app))
+
+		api.Get("/popular-items", getPopularItemsHandler(&app))
+	})
 
 	// Check if SSL should be enabled (default: true)
 	useSSL := os.Getenv("USE_SSL")

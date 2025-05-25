@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -29,8 +31,26 @@ const (
 	defaultTimeout               = 10 * time.Second
 	defaultMatchCount            = 25
 	defaultQueueID               = 0
-	defaultConcurrencyLimit      = 20 // Tunable concurrency limit for match fetching
+	defaultConcurrencyLimit      = 25 // Tunable concurrency limit for match fetching
 	dataDragonBaseURL            = "https://ddragon.leagueoflegends.com"
+)
+
+var (
+	// Create a dedicated HTTP client pool for Riot API
+	riotClientPool = &sync.Pool{
+		New: func() interface{} {
+			return &http.Client{
+				Transport: &http.Transport{
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 200,
+					IdleConnTimeout:     90 * time.Second,
+					TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+					ForceAttemptHTTP2:   true,
+				},
+				Timeout: 10 * time.Second,
+			}
+		},
+	}
 )
 
 func getPUUID(app *GlobalAppData, region, gameName, tagLine string) (string, error) {
@@ -43,7 +63,11 @@ func getPUUID(app *GlobalAppData, region, gameName, tagLine string) (string, err
 		req, _ := http.NewRequest("GET", url, nil)
 		req.Header.Set("X-Riot-Token", app.riotAPIKey)
 
-		resp, err := app.httpClient.Do(req)
+		// Get HTTP client from pool
+		client := riotClientPool.Get().(*http.Client)
+		defer riotClientPool.Put(client)
+
+		resp, err := client.Do(req)
 		if err != nil {
 			return "", fmt.Errorf("failed to make PUUID request: %w", err)
 		}
@@ -94,7 +118,11 @@ func getMatchIDs(app *GlobalAppData, region, puuid string, count int, queueID in
 		req, _ := http.NewRequest("GET", url, nil)
 		req.Header.Set("X-Riot-Token", app.riotAPIKey)
 
-		resp, err := app.httpClient.Do(req)
+		// Get HTTP client from pool
+		client := riotClientPool.Get().(*http.Client)
+		defer riotClientPool.Put(client)
+
+		resp, err := client.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("failed to make match IDs request: %w", err)
 		}
@@ -141,7 +169,11 @@ func getMatchDetails(app *GlobalAppData, region, matchID string) (*MatchDto, err
 		req, _ := http.NewRequest("GET", url, nil)
 		req.Header.Set("X-Riot-Token", app.riotAPIKey)
 
-		resp, err := app.httpClient.Do(req)
+		// Get HTTP client from pool
+		client := riotClientPool.Get().(*http.Client)
+		defer riotClientPool.Put(client)
+
+		resp, err := client.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("failed to make match details request for %s: %w", matchID, err)
 		}
@@ -274,38 +306,50 @@ func getConcurrencyLimit() int {
 
 // fetchMatchesConcurrently fetches match details concurrently using errgroup with tunable concurrency
 func fetchMatchesConcurrently(app *GlobalAppData, region string, ids []string, puuid string) []PlayerMatchStats {
-	g, _ := errgroup.WithContext(context.Background())
+	g, ctx := errgroup.WithContext(context.Background())
 	g.SetLimit(getConcurrencyLimit()) // tune until you hit Riot's global rate-limit
 
-	results := make([]PlayerMatchStats, len(ids))
-	for i, id := range ids {
-		i, id := i, id // capture loop variables
+	// Use channels for better memory management
+	matchChan := make(chan PlayerMatchStats, len(ids))
+
+	for _, id := range ids {
+		id := id // capture loop variable
 		g.Go(func() error {
+			// Skip if context is cancelled
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
 			match, err := getMatchDetails(app, region, id)
 			if err != nil || match == nil {
-				return err // auto-propagate error for cancellation
+				return nil // Don't fail the entire group
 			}
+
 			stats, err := extractPlayerMatchStats(match, puuid, app)
-			if err != nil {
-				return err
+			if err != nil || stats == nil {
+				return nil
 			}
-			if stats != nil {
-				results[i] = *stats
-			}
+
+			matchChan <- *stats
 			return nil
 		})
 	}
-	_ = g.Wait() // ignore err: partial data is ok
 
-	// Filter out empty results (from failed fetches)
+	// Wait for all goroutines
+	go func() {
+		g.Wait()
+		close(matchChan)
+	}()
+
+	// Collect results
 	var matches []PlayerMatchStats
-	for _, result := range results {
-		if result.MatchID != "" { // Check if the result is valid
-			matches = append(matches, result)
-		}
+	for stats := range matchChan {
+		matches = append(matches, stats)
 	}
 
-	// Sort matches by game creation time
+	// Sort by game creation time
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].GameCreation > matches[j].GameCreation
 	})
@@ -320,6 +364,24 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 	puuid, err := getPUUID(app, userRegion, gameName, tagLine)
 	if err != nil {
 		return nil, fmt.Errorf("error getting PUUID: %w", err)
+	}
+
+	// Validate PUUID and region before using in MongoDB queries
+	if err := ValidatePUUID(puuid); err != nil {
+		return nil, fmt.Errorf("invalid PUUID received from API: %w", err)
+	}
+
+	if err := ValidateRegion(userRegion); err != nil {
+		return nil, fmt.Errorf("invalid region: %w", err)
+	}
+
+	// Additional NoSQL injection prevention
+	if err := PreventNoSQLInjection(puuid); err != nil {
+		return nil, fmt.Errorf("potential injection attempt in PUUID: %w", err)
+	}
+
+	if err := PreventNoSQLInjection(userRegion); err != nil {
+		return nil, fmt.Errorf("potential injection attempt in region: %w", err)
 	}
 
 	collection := app.mongoClient.Database(app.mongoDatabase).Collection("userperformances")
@@ -401,6 +463,16 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 		persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
+		// Validate data before MongoDB write to prevent injection
+		if err := ValidatePUUID(data.PUUID); err != nil {
+			log.Printf("Invalid PUUID in async write, skipping: %v", err)
+			return
+		}
+		if err := ValidateRegion(data.Region); err != nil {
+			log.Printf("Invalid region in async write, skipping: %v", err)
+			return
+		}
+
 		// Async MongoDB write
 		opts := options.Update().SetUpsert(true)
 		filter := bson.M{"_id": data.PUUID, "region": data.Region}
@@ -419,7 +491,12 @@ func fetchAndStoreUserPerformance(app *GlobalAppData, userRegion, gameName, tagL
 func loadDataDragonVersions(app *GlobalAppData) ([]string, error) {
 	url := fmt.Sprintf("%s/api/versions.json", dataDragonBaseURL)
 	req, _ := http.NewRequest("GET", url, nil)
-	resp, err := app.httpClient.Do(req)
+
+	// Get HTTP client from pool
+	client := riotClientPool.Get().(*http.Client)
+	defer riotClientPool.Put(client)
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch ddragon versions: %w", err)
 	}
@@ -449,7 +526,12 @@ func loadChampions(app *GlobalAppData, version string) (map[string]ChampionData,
 
 	url := fmt.Sprintf("%s/cdn/%s/data/en_US/champion.json", dataDragonBaseURL, version)
 	req, _ := http.NewRequest("GET", url, nil)
-	resp, err := app.httpClient.Do(req)
+
+	// Get HTTP client from pool
+	client := riotClientPool.Get().(*http.Client)
+	defer riotClientPool.Put(client)
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch champions for version %s: %w", version, err)
 	}
@@ -489,7 +571,12 @@ func loadItems(app *GlobalAppData, version string) (map[string]ItemData, error) 
 
 	url := fmt.Sprintf("%s/cdn/%s/data/en_US/item.json", dataDragonBaseURL, version)
 	req, _ := http.NewRequest("GET", url, nil)
-	resp, err := app.httpClient.Do(req)
+
+	// Get HTTP client from pool
+	client := riotClientPool.Get().(*http.Client)
+	defer riotClientPool.Put(client)
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch items for version %s: %w", version, err)
 	}
@@ -528,7 +615,12 @@ func loadSummonerSpells(app *GlobalAppData, version string) (map[string]Summoner
 
 	url := fmt.Sprintf("%s/cdn/%s/data/en_US/summoner.json", dataDragonBaseURL, version)
 	req, _ := http.NewRequest("GET", url, nil)
-	resp, err := app.httpClient.Do(req)
+
+	// Get HTTP client from pool
+	client := riotClientPool.Get().(*http.Client)
+	defer riotClientPool.Put(client)
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch summoner spells for version %s: %w", version, err)
 	}
@@ -567,7 +659,12 @@ func loadRunes(app *GlobalAppData, version string) (map[int]RuneInfo, error) {
 
 	url := fmt.Sprintf("%s/cdn/%s/data/en_US/runesReforged.json", dataDragonBaseURL, version)
 	req, _ := http.NewRequest("GET", url, nil)
-	resp, err := app.httpClient.Do(req)
+
+	// Get HTTP client from pool
+	client := riotClientPool.Get().(*http.Client)
+	defer riotClientPool.Put(client)
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch runes for version %s: %w", version, err)
 	}

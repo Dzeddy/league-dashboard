@@ -6,47 +6,59 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-redis/redis/v8"
-	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
 func getPlayerPerformanceHandler(app *GlobalAppData) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		region := vars["region"]
-		gameName := vars["gameName"]
-		tagLine := vars["tagLine"]
+		region := chi.URLParam(r, "region")
+		gameName := chi.URLParam(r, "gameName")
+		tagLine := chi.URLParam(r, "tagLine")
 
 		countStr := r.URL.Query().Get("count")
 		queueIDStr := r.URL.Query().Get("queueId")
 
-		count := defaultMatchCount
-		if countStr != "" {
-			c, err := strconv.Atoi(countStr)
-			if err == nil && c > 0 && c <= 100 { // 100 max
-				count = c
-			} else if err != nil {
-				http.Error(w, "Invalid 'count' parameter", http.StatusBadRequest)
-				return
-			}
+		// Validate and sanitize input parameters
+		validatedGameName, validatedTagLine, validatedRegion, err := ValidateAndSanitizeInput(gameName, tagLine, region)
+		if err != nil {
+			log.Printf("Input validation error: %v", err)
+			http.Error(w, fmt.Sprintf("Invalid input: %v", err), http.StatusBadRequest)
+			return
 		}
 
-		queueID := defaultQueueID
-		if queueIDStr != "" {
-			q, err := strconv.Atoi(queueIDStr)
-			if err == nil {
-				queueID = q
-			} else {
-				http.Error(w, "Invalid 'queueId' parameter", http.StatusBadRequest)
-				return
-			}
+		// Additional NoSQL injection prevention
+		if err := PreventNoSQLInjection(validatedGameName); err != nil {
+			log.Printf("Potential NoSQL injection attempt in gameName: %s", validatedGameName)
+			http.Error(w, "Invalid input detected", http.StatusBadRequest)
+			return
+		}
+		if err := PreventNoSQLInjection(validatedTagLine); err != nil {
+			log.Printf("Potential NoSQL injection attempt in tagLine: %s", validatedTagLine)
+			http.Error(w, "Invalid input detected", http.StatusBadRequest)
+			return
 		}
 
-		log.Printf("Handler: Received request for %s#%s in region %s, count: %d, queueId: %d", gameName, tagLine, region, count, queueID)
+		// Validate count parameter
+		count, err := ValidateCount(countStr, defaultMatchCount, 100)
+		if err != nil {
+			log.Printf("Count validation error: %v", err)
+			http.Error(w, fmt.Sprintf("Invalid count parameter: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Validate queueID parameter
+		queueID, err := ValidateQueueID(queueIDStr, defaultQueueID)
+		if err != nil {
+			log.Printf("QueueID validation error: %v", err)
+			http.Error(w, fmt.Sprintf("Invalid queueId parameter: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		log.Printf("Handler: Received player performance request for %s#%s in region %s, count: %d, queueId: %d", validatedGameName, validatedTagLine, validatedRegion, count, queueID)
 
 		if app.riotAPIKey == "" {
 			log.Println("Error: RIOT_API_KEY is not set.")
@@ -64,16 +76,16 @@ func getPlayerPerformanceHandler(app *GlobalAppData) http.HandlerFunc {
 			}
 		}
 
-		performanceData, err := fetchAndStoreUserPerformance(app, region, gameName, tagLine, count, queueID)
+		performance, err := fetchAndStoreUserPerformance(app, validatedRegion, validatedGameName, validatedTagLine, count, queueID)
 		if err != nil {
-			log.Printf("Error fetching user performance for %s#%s: %v", gameName, tagLine, err)
-			http.Error(w, fmt.Sprintf("Error fetching player data: %v", err), http.StatusInternalServerError)
+			log.Printf("Error fetching user performance for %s#%s: %v", validatedGameName, validatedTagLine, err)
+			http.Error(w, fmt.Sprintf("Error fetching user performance: %v", err), http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(performanceData); err != nil {
-			log.Printf("Error encoding response for %s#%s: %v", gameName, tagLine, err)
+		if err := json.NewEncoder(w).Encode(performance); err != nil {
+			log.Printf("Error encoding response for %s#%s: %v", validatedGameName, validatedTagLine, err)
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		}
 	}
@@ -122,9 +134,25 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 
 func getMatchDetailsHandler(app *GlobalAppData) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		region := vars["region"]
-		matchId := vars["matchId"]
+		region := chi.URLParam(r, "region")
+		matchId := chi.URLParam(r, "matchId")
+
+		// Validate and sanitize input parameters
+		validatedRegion, validatedMatchId, err := ValidateMatchInput(region, matchId)
+		if err != nil {
+			log.Printf("Input validation error: %v", err)
+			http.Error(w, fmt.Sprintf("Invalid input: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Additional NoSQL injection prevention
+		if err := PreventNoSQLInjection(validatedMatchId); err != nil {
+			log.Printf("Potential NoSQL injection attempt in matchId: %s", validatedMatchId)
+			http.Error(w, "Invalid input detected", http.StatusBadRequest)
+			return
+		}
+
+		log.Printf("Handler: Received match details request for match %s in region %s", validatedMatchId, validatedRegion)
 
 		if app.riotAPIKey == "" {
 			log.Println("Error: RIOT_API_KEY is not set.")
@@ -132,9 +160,9 @@ func getMatchDetailsHandler(app *GlobalAppData) http.HandlerFunc {
 			return
 		}
 
-		match, err := getMatchDetails(app, region, matchId)
+		match, err := getMatchDetails(app, validatedRegion, validatedMatchId)
 		if err != nil {
-			log.Printf("Error fetching match details for %s: %v", matchId, err)
+			log.Printf("Error fetching match details for %s: %v", validatedMatchId, err)
 			http.Error(w, "Error fetching match details", http.StatusInternalServerError)
 			return
 		}
@@ -264,37 +292,50 @@ func getPopularItemsHandler(app *GlobalAppData) http.HandlerFunc {
 
 func getRecentGamesSummaryHandler(app *GlobalAppData) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		region := vars["region"]
-		gameName := vars["gameName"]
-		tagLine := vars["tagLine"]
+		region := chi.URLParam(r, "region")
+		gameName := chi.URLParam(r, "gameName")
+		tagLine := chi.URLParam(r, "tagLine")
 
 		countStr := r.URL.Query().Get("count")
 		queueIDStr := r.URL.Query().Get("queueId")
 
-		count := defaultMatchCount
-		if countStr != "" {
-			c, err := strconv.Atoi(countStr)
-			if err == nil && c > 0 && c <= 100 { // 100 max
-				count = c
-			} else if err != nil {
-				http.Error(w, "Invalid 'count' parameter", http.StatusBadRequest)
-				return
-			}
+		// Validate and sanitize input parameters
+		validatedGameName, validatedTagLine, validatedRegion, err := ValidateAndSanitizeInput(gameName, tagLine, region)
+		if err != nil {
+			log.Printf("Input validation error: %v", err)
+			http.Error(w, fmt.Sprintf("Invalid input: %v", err), http.StatusBadRequest)
+			return
 		}
 
-		queueID := defaultQueueID
-		if queueIDStr != "" {
-			q, err := strconv.Atoi(queueIDStr)
-			if err == nil {
-				queueID = q
-			} else {
-				http.Error(w, "Invalid 'queueId' parameter", http.StatusBadRequest)
-				return
-			}
+		// Additional NoSQL injection prevention
+		if err := PreventNoSQLInjection(validatedGameName); err != nil {
+			log.Printf("Potential NoSQL injection attempt in gameName: %s", validatedGameName)
+			http.Error(w, "Invalid input detected", http.StatusBadRequest)
+			return
+		}
+		if err := PreventNoSQLInjection(validatedTagLine); err != nil {
+			log.Printf("Potential NoSQL injection attempt in tagLine: %s", validatedTagLine)
+			http.Error(w, "Invalid input detected", http.StatusBadRequest)
+			return
 		}
 
-		log.Printf("Handler: Received recent games summary request for %s#%s in region %s, count: %d, queueId: %d", gameName, tagLine, region, count, queueID)
+		// Validate count parameter
+		count, err := ValidateCount(countStr, defaultMatchCount, 100)
+		if err != nil {
+			log.Printf("Count validation error: %v", err)
+			http.Error(w, fmt.Sprintf("Invalid count parameter: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Validate queueID parameter
+		queueID, err := ValidateQueueID(queueIDStr, defaultQueueID)
+		if err != nil {
+			log.Printf("QueueID validation error: %v", err)
+			http.Error(w, fmt.Sprintf("Invalid queueId parameter: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		log.Printf("Handler: Received recent games summary request for %s#%s in region %s, count: %d, queueId: %d", validatedGameName, validatedTagLine, validatedRegion, count, queueID)
 
 		if app.riotAPIKey == "" {
 			log.Println("Error: RIOT_API_KEY is not set.")
@@ -312,16 +353,104 @@ func getRecentGamesSummaryHandler(app *GlobalAppData) http.HandlerFunc {
 			}
 		}
 
-		summaryData, err := fetchRecentGamesSummary(app, region, gameName, tagLine, count, queueID)
+		summaryData, err := fetchRecentGamesSummary(app, validatedRegion, validatedGameName, validatedTagLine, count, queueID)
 		if err != nil {
-			log.Printf("Error fetching recent games summary for %s#%s: %v", gameName, tagLine, err)
+			log.Printf("Error fetching recent games summary for %s#%s: %v", validatedGameName, validatedTagLine, err)
 			http.Error(w, fmt.Sprintf("Error fetching recent games summary: %v", err), http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(summaryData); err != nil {
-			log.Printf("Error encoding response for %s#%s: %v", gameName, tagLine, err)
+			log.Printf("Error encoding response for %s#%s: %v", validatedGameName, validatedTagLine, err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
+	}
+}
+
+func getPlayerDashboardHandler(app *GlobalAppData) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		region := chi.URLParam(r, "region")
+		gameName := chi.URLParam(r, "gameName")
+		tagLine := chi.URLParam(r, "tagLine")
+
+		countStr := r.URL.Query().Get("count")
+		queueIDStr := r.URL.Query().Get("queueId")
+
+		// Validate and sanitize input parameters
+		validatedGameName, validatedTagLine, validatedRegion, err := ValidateAndSanitizeInput(gameName, tagLine, region)
+		if err != nil {
+			log.Printf("Input validation error: %v", err)
+			http.Error(w, fmt.Sprintf("Invalid input: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Additional NoSQL injection prevention
+		if err := PreventNoSQLInjection(validatedGameName); err != nil {
+			log.Printf("Potential NoSQL injection attempt in gameName: %s", validatedGameName)
+			http.Error(w, "Invalid input detected", http.StatusBadRequest)
+			return
+		}
+		if err := PreventNoSQLInjection(validatedTagLine); err != nil {
+			log.Printf("Potential NoSQL injection attempt in tagLine: %s", validatedTagLine)
+			http.Error(w, "Invalid input detected", http.StatusBadRequest)
+			return
+		}
+
+		// Validate count parameter
+		count, err := ValidateCount(countStr, defaultMatchCount, 100)
+		if err != nil {
+			log.Printf("Count validation error: %v", err)
+			http.Error(w, fmt.Sprintf("Invalid count parameter: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Validate queueID parameter
+		queueID, err := ValidateQueueID(queueIDStr, defaultQueueID)
+		if err != nil {
+			log.Printf("QueueID validation error: %v", err)
+			http.Error(w, fmt.Sprintf("Invalid queueId parameter: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		log.Printf("Handler: Received player dashboard request for %s#%s in region %s, count: %d, queueId: %d", validatedGameName, validatedTagLine, validatedRegion, count, queueID)
+
+		if app.riotAPIKey == "" {
+			log.Println("Error: RIOT_API_KEY is not set.")
+			http.Error(w, "Server configuration error: Riot API Key not set.", http.StatusInternalServerError)
+			return
+		}
+
+		if app.staticData == nil {
+			log.Println("Static data not yet loaded, attempting to load now.")
+			err := populateStaticData(app)
+			if err != nil {
+				log.Printf("Error populating static data on demand: %v", err)
+				http.Error(w, "Error loading required game data. Please try again shortly.", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Fetch user performance data once
+		userPerformance, err := fetchAndStoreUserPerformance(app, validatedRegion, validatedGameName, validatedTagLine, count, queueID)
+		if err != nil {
+			log.Printf("Error fetching user performance for %s#%s: %v", validatedGameName, validatedTagLine, err)
+			http.Error(w, fmt.Sprintf("Error fetching user performance: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Calculate summary from the same data
+		summary := calculateRecentGamesSummary(userPerformance.Matches, userPerformance.PUUID, userPerformance.Region, userPerformance.RiotID)
+
+		// Combine both into dashboard data
+		dashboardData := PlayerDashboardData{
+			Summary: summary,
+			Matches: userPerformance.Matches,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(dashboardData); err != nil {
+			log.Printf("Error encoding dashboard response for %s#%s: %v", validatedGameName, validatedTagLine, err)
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		}
 	}

@@ -297,4 +297,10 @@ export interface ChampionStats {
     avgDamageToChampions: number;
     avgKillParticipation: number;
     lastPlayed: number;
+}
+
+// PlayerDashboardData combines summary and matches data for a single API response
+export interface PlayerDashboardData {
+    summary: RecentGamesSummary;
+    matches: PlayerMatchStats[];
 } 

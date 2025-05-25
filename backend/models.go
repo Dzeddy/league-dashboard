@@ -391,3 +391,9 @@ type ChampionStats struct {
 	AvgKillParticipation float64 `json:"avgKillParticipation" bson:"avgKillParticipation"`
 	LastPlayed           int64   `json:"lastPlayed" bson:"lastPlayed"`
 }
+
+// PlayerDashboardData combines summary and matches data for a single API response
+type PlayerDashboardData struct {
+	Summary *RecentGamesSummary `json:"summary"`
+	Matches []PlayerMatchStats  `json:"matches"`
+}
