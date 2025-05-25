@@ -4,31 +4,44 @@ This guide explains how to configure SSL/HTTPS for the League Dashboard backend.
 
 ## Quick Start
 
-The backend now supports HTTPS by default. When you start the server, it will:
+The backend supports multiple SSL/HTTPS options:
 
-1. **Automatically generate** self-signed certificates if none are found
-2. **Start on port 8443** (HTTPS) by default
-3. **Use secure TLS configuration** with modern cipher suites
+1. **Let's Encrypt Autocert** (Recommended for Production) - Automatic free SSL certificates
+2. **Auto-Generated Self-Signed** (Development) - Automatically generated certificates
+3. **Custom Certificates** (Production) - Bring your own certificates
+4. **HTTP Only** (Development) - Disable SSL entirely
 
-## Environment Variables
+## SSL Options
 
-Configure SSL behavior with these environment variables:
+### Option 1: Let's Encrypt Autocert (🌟 Recommended for Production)
+
+**NEW**: Automatic SSL certificate management with Let's Encrypt. Free, trusted certificates that auto-renew.
 
 ```bash
-# Enable/disable SSL (default: true)
-USE_SSL=true
+# Set environment variables
+export AUTOCERT_DOMAINS="yourdomain.com,www.yourdomain.com"
+export AUTOCERT_EMAIL="admin@yourdomain.com"
+export USE_SSL=true
 
-# Server port (default: 8443 for HTTPS, 8080 for HTTP)
-PORT=8443
-
-# SSL certificate files (optional - auto-generated if not provided)
-SSL_CERT_FILE=server.crt
-SSL_KEY_FILE=server.key
+# Run with autocert
+./run-autocert.sh
 ```
 
-## Certificate Options
+**Features:**
+- ✅ Free SSL certificates from Let's Encrypt
+- ✅ Automatic renewal (no manual intervention)
+- ✅ Trusted by all browsers (no warnings)
+- ✅ Multiple domain support
+- ✅ HTTP-01 challenge validation
 
-### Option 1: Auto-Generated Certificates (Recommended for Development)
+**Requirements:**
+- Public domain name pointing to your server
+- Ports 80 and 443 accessible from internet
+- Root/sudo access for privileged ports
+
+📖 **See [README_LETSENCRYPT.md](README_LETSENCRYPT.md) for detailed setup instructions.**
+
+### Option 2: Auto-Generated Certificates (Development)
 
 The server will automatically generate self-signed certificates when started:
 
@@ -43,9 +56,9 @@ Generated certificates are valid for:
 - `127.0.0.1`
 - `::1` (IPv6 loopback)
 
-### Option 2: Custom Certificates (Production)
+### Option 3: Custom Certificates (Production)
 
-For production, use proper SSL certificates:
+For production with your own certificates:
 
 ```bash
 # Set environment variables
@@ -58,7 +71,7 @@ export PORT=443
 go run .
 ```
 
-### Option 3: Disable SSL (Development Only)
+### Option 4: Disable SSL (Development Only)
 
 To run without SSL (HTTP only):
 
@@ -69,6 +82,32 @@ go run .
 ```
 
 ⚠️ **Warning**: Only disable SSL for local development. Production should always use HTTPS.
+
+## Environment Variables
+
+Configure SSL behavior with these environment variables:
+
+```bash
+# SSL Mode
+USE_SSL=true                    # Enable/disable SSL (default: true)
+PORT=443                        # Server port (443 for HTTPS, 8080 for HTTP)
+
+# Let's Encrypt Autocert (Recommended for Production)
+AUTOCERT_DOMAINS=example.com,www.example.com  # Comma-separated domains
+AUTOCERT_EMAIL=admin@example.com               # Contact email
+
+# Manual Certificates (Alternative for Production)
+SSL_CERT_FILE=server.crt        # Path to certificate file
+SSL_KEY_FILE=server.key         # Path to private key file
+```
+
+## Production Deployment Comparison
+
+| Method | Pros | Cons | Best For |
+|--------|------|------|----------|
+| **Let's Encrypt Autocert** | Free, automatic, trusted, auto-renewal | Requires public domain, ports 80/443 | Production servers |
+| **Custom Certificates** | Full control, works offline | Manual renewal, costs money | Enterprise/internal |
+| **Self-Signed** | Quick setup, no external deps | Browser warnings, not trusted | Development only |
 
 ## CORS Configuration
 
@@ -86,11 +125,17 @@ Update your frontend to use the HTTPS endpoint:
 // For local development
 const API_BASE_URL = 'https://localhost:8443/api';
 
-// For production
-const API_BASE_URL = 'https://your-domain.com/api';
+// For production with Let's Encrypt
+const API_BASE_URL = 'https://yourdomain.com/api';
 ```
 
 ## Troubleshooting
+
+### Let's Encrypt Issues
+
+1. **Domain not accessible**: Verify DNS points to correct IP
+2. **Challenge failed**: Ensure port 80 is open and accessible
+3. **Rate limits**: Let's Encrypt has rate limits (50 certs/week per domain)
 
 ### Self-Signed Certificate Warnings
 
@@ -110,38 +155,16 @@ If certificate generation fails:
 
 ### Port Already in Use
 
-If port 8443 is already in use:
+If ports are already in use:
 
 ```bash
-export PORT=8444  # Use a different port
+# Check what's using the ports
+lsof -i :80
+lsof -i :443
+
+# Use different ports (development only)
+export PORT=8444
 go run .
-```
-
-## Production Deployment
-
-For production deployment:
-
-1. **Use proper SSL certificates** from a CA (Let's Encrypt, etc.)
-2. **Set appropriate environment variables**
-3. **Configure firewall rules** for your chosen port
-4. **Use a reverse proxy** (nginx, Apache) if needed
-5. **Update DNS records** to point to your server
-
-Example nginx configuration:
-```nginx
-server {
-    listen 443 ssl;
-    server_name your-domain.com;
-    
-    ssl_certificate /path/to/certificate.crt;
-    ssl_certificate_key /path/to/private.key;
-    
-    location /api/ {
-        proxy_pass https://localhost:8443/api/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
 ```
 
 ## Security Features
@@ -163,4 +186,28 @@ curl -k https://localhost:8443/api/health
 
 # Check certificate details
 openssl s_client -connect localhost:8443 -servername localhost
-``` 
+
+# Test Let's Encrypt certificate
+curl https://yourdomain.com/api/health
+```
+
+## Migration Guide
+
+### From Self-Signed to Let's Encrypt
+
+1. Set up your domain DNS to point to your server
+2. Configure environment variables:
+   ```bash
+   export AUTOCERT_DOMAINS="yourdomain.com"
+   export AUTOCERT_EMAIL="admin@yourdomain.com"
+   export USE_SSL=true
+   ```
+3. Remove or comment out `SSL_CERT_FILE` and `SSL_KEY_FILE`
+4. Restart with `./run-autocert.sh`
+
+### From Custom Certificates to Let's Encrypt
+
+1. Configure autocert environment variables
+2. Remove custom certificate configuration
+3. Restart the application
+4. Let's Encrypt will take over certificate management 
