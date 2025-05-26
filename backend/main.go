@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"log"
@@ -55,19 +56,21 @@ func corsMiddleware(next http.Handler) http.Handler {
 		"https://localhost:3000":                    true,
 		"https://dzeddy.github.io":                  true,
 		"https://league-dashboard-eosin.vercel.app": true,
+		"https://dzed.cx":                           true,
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 
+		// Always set CORS headers for allowed origins, even for 404s
 		if allowedOrigins[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
 
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-
+		// Handle preflight requests
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -75,6 +78,33 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// loggingMiddleware logs all incoming requests for debugging
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		log.Printf("Request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+
+		// Create a response writer wrapper to capture status code
+		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		next.ServeHTTP(wrapped, r)
+
+		duration := time.Since(start)
+		log.Printf("Response: %d for %s %s (took %v)", wrapped.statusCode, r.Method, r.URL.Path, duration)
+	})
+}
+
+// responseWriter wraps http.ResponseWriter to capture status code
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
 }
 
 // generateSelfSignedCert generates a self-signed certificate for development
@@ -395,6 +425,7 @@ func main() {
 	r := chi.NewRouter()
 
 	r.Use(corsMiddleware)
+	r.Use(loggingMiddleware)
 
 	r.Route("/api", func(api chi.Router) {
 		api.Options("/*", func(w http.ResponseWriter, r *http.Request) {
@@ -415,6 +446,19 @@ func main() {
 		api.Get("/match/{region}/{matchId}", getMatchDetailsHandler(&app))
 
 		api.Get("/popular-items", getPopularItemsHandler(&app))
+	})
+
+	// Add a catch-all route for debugging 404s
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("404 Not Found: %s %s", r.Method, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":   "Not Found",
+			"path":    r.URL.Path,
+			"method":  r.Method,
+			"message": "The requested endpoint does not exist",
+		})
 	})
 
 	// Check if SSL should be enabled (default: true)

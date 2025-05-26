@@ -255,6 +255,7 @@ function App() {
   // Sorting state for champion performance table
   const [sortColumn, setSortColumn] = useState<SortColumn>('games');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [showAllChampions, setShowAllChampions] = useState(false);
 
   // Derived stats (these are calculated but will be used later for filtering/display)
   // const [lifetimeStats, setLifetimeStats] = useState<AggregatedStats | null>(null);
@@ -1314,8 +1315,10 @@ function App() {
     const { championStats } = recentGamesSummary;
     const dataDragonBase = "https://ddragon.leagueoflegends.com/cdn";
     
+    const CHAMPIONS_TO_SHOW_DEFAULT = 10;
+    
     // Get all champions and apply sorting
-    const champions = Object.keys(championStats).sort((a, b) => {
+    const sortedChampions = Object.keys(championStats).sort((a, b) => {
       const statsA = championStats[a];
       const statsB = championStats[b];
       
@@ -1348,7 +1351,15 @@ function App() {
       }
       
       return sortDirection === 'asc' ? comparison : -comparison;
-    }).slice(0, 10); // Show top 10
+    });
+    
+    // Apply display limit
+    const championsToDisplay = showAllChampions 
+      ? sortedChampions 
+      : sortedChampions.slice(0, CHAMPIONS_TO_SHOW_DEFAULT);
+    
+    const totalChampions = sortedChampions.length;
+    const hiddenChampions = totalChampions - CHAMPIONS_TO_SHOW_DEFAULT;
 
     const getSortIcon = (column: SortColumn) => {
       if (sortColumn !== column) return '';
@@ -1359,7 +1370,12 @@ function App() {
       <div className="champion-stats">
         <div className="stats-header">
           <h2>Champion Performance</h2>
-          <span className="sub-text">Click column headers to sort • Showing top 10 champions</span>
+          <span className="sub-text">
+            Click column headers to sort • 
+            {showAllChampions 
+              ? `Showing all ${totalChampions} champions` 
+              : `Showing top ${CHAMPIONS_TO_SHOW_DEFAULT} of ${totalChampions} champions`}
+          </span>
         </div>
 
         <div className="champion-table">
@@ -1408,7 +1424,7 @@ function App() {
             </div>
           </div>
 
-          {champions.map(championName => {
+          {championsToDisplay.map(championName => {
             const stats = championStats[championName];
             return (
               <div key={championName} className="champion-row">
@@ -1443,6 +1459,28 @@ function App() {
             );
           })}
         </div>
+        
+        {hiddenChampions > 0 && !showAllChampions && (
+          <div className="show-more-champions">
+            <button 
+              className="show-more-button"
+              onClick={() => setShowAllChampions(true)}
+            >
+              Show {hiddenChampions} more champion{hiddenChampions !== 1 ? 's' : ''}
+            </button>
+          </div>
+        )}
+        
+        {showAllChampions && totalChampions > CHAMPIONS_TO_SHOW_DEFAULT && (
+          <div className="show-more-champions">
+            <button 
+              className="show-more-button"
+              onClick={() => setShowAllChampions(false)}
+            >
+              Show less
+            </button>
+          </div>
+        )}
       </div>
     );
   };

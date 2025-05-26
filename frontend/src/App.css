@@ -1653,7 +1653,43 @@ button, select, input {
 }
 
 @keyframes skeleton-pulse {
-  0% { opacity: 0.6; }
-  50% { opacity: 1; }
-  100% { opacity: 0.6; }
+  0% { opacity: 1; }
+  50% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+/* Show More/Less Champions Button Styles */
+.show-more-champions {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+  padding: 1rem 0;
+}
+
+.show-more-button {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e0e0e0;
+  padding: 0.5rem 1.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(10px);
+}
+
+.show-more-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.show-more-button:active {
+  transform: translateY(0);
+}
+
+/* Update the stats-header to handle dynamic text */
+.champion-stats .stats-header .sub-text {
+  transition: opacity 0.3s ease;
 }
