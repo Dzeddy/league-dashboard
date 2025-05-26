@@ -56,7 +56,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 		"https://localhost:3000":                    true,
 		"https://dzeddy.github.io":                  true,
 		"https://league-dashboard-eosin.vercel.app": true,
-		"https://dzed.cx":                           true,
+		"https://dashboard.dzed.cx":                 true,
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
